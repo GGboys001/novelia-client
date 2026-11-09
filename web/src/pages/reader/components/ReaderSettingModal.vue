@@ -196,8 +196,8 @@ const setIndentSize = (diff: number) => {
                 <n-slider
                   :to="`#${popupTargetId}`"
                   v-model:value="readerSetting.pageWidth"
-                  :step="50"
-                  :min="600"
+                  :step="isMobile ? 20 : 50"
+                  :min="240"
                   :max="1200"
                   style="flex: auto"
                   :format-tooltip="(value: number) => `${value}px`"

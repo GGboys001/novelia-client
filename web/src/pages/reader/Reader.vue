@@ -167,10 +167,20 @@ watch(
   route,
   (route) => {
     const urlChapterId = route.params.chapterId as string;
-    if (urlChapterId !== targetChapterId.value) {
-      chapterResult.value = undefined;
-      navToChapter(urlChapterId);
+    if (urlChapterId === targetChapterId.value) {
+      return;
     }
+    // 滚动模式下 URL 只是滚动切换章节后的同步结果，章节已经在列表里时
+    // 不能重新走 navToChapter：那会清空列表并滚回顶部，表现为闪回上一章。
+    if (
+      readerSetting.value.pageTurnMode === 'scroll' &&
+      chapterList.value.some((it) => it.chapterId === urlChapterId && it.result)
+    ) {
+      targetChapterId.value = urlChapterId;
+      return;
+    }
+    chapterResult.value = undefined;
+    navToChapter(urlChapterId);
   },
   {
     immediate: true,
@@ -202,7 +212,7 @@ useScrollDetector((payload) => {
       }
     }
 
-    if (payload.chapterId !== route.params.chapterId) {
+    if (payload.chapterId !== currentChapterId.value) {
       // 更新标题/章节/链接
       const chapter = chapterList.value.find(
         (it) => it.chapterId === payload.chapterId,
