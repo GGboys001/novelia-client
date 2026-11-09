@@ -1,0 +1,157 @@
+import tailwindcss from '@tailwindcss/vite';
+import { htmlBootstrapPlugin } from '@novelia/web-kit/vite';
+import vue from '@vitejs/plugin-vue';
+import { fileURLToPath, URL } from 'node:url';
+import { ProxyAgent } from 'proxy-agent';
+import Sonda from 'sonda/vite';
+import AutoImport from 'unplugin-auto-import/vite';
+import { NaiveUiResolver } from 'unplugin-vue-components/resolvers';
+import Components from 'unplugin-vue-components/vite';
+import type { UserConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
+
+export default defineConfig(({ command, mode }) => {
+  const env = loadEnv(
+    mode,
+    fileURLToPath(new URL('.', import.meta.url)),
+    'VITE_',
+  );
+  const isServe = command === 'serve';
+  const isAndroid = process.env.TAURI_ENV_PLATFORM === 'android';
+  const isLocalApi = env.VITE_LOCAL_API === 'true';
+  const apiUrl = isLocalApi ? 'http://localhost:5000' : 'https://n.novelia.cc';
+  const enableSonda = env.VITE_ENABLE_SONDA === 'true';
+  const clientApiBase = isAndroid
+    ? 'http://127.0.0.1:43110/api/'
+    : '/api/';
+  const clientAuthBase = isAndroid
+    ? 'http://127.0.0.1:43110/auth/'
+    : isServe
+      ? '/auth-proxy/'
+      : 'https://auth.novelia.cc/';
+  const config: UserConfig = {
+    define: {
+      __API_BASE__: JSON.stringify(clientApiBase),
+      __AUTH_URL__: JSON.stringify(clientAuthBase),
+      __ECH_AVAILABLE__: JSON.stringify(isAndroid),
+      __BUILD_TIME__: JSON.stringify(
+        env.VITE_BUILD_TIME || new Date().toISOString(),
+      ),
+      __COMMIT_SHA__: JSON.stringify(env.VITE_COMMIT_SHA || 'unknown'),
+    },
+    build: {
+      cssCodeSplit: false,
+      rolldownOptions: {
+        output: {
+          // 应用代码自动分包，保留 web-kit 和现有大依赖的独立分包规则。
+          manualChunks(id) {
+            const normalizedId = id.replaceAll('\\', '/');
+            if (normalizedId.includes('/node_modules/@novelia/web-kit/')) {
+              return 'web-kit';
+            }
+            if (normalizedId.includes('/node_modules/')) {
+              if (normalizedId.includes('/node_modules/@zip.js/')) {
+                return 'dep-zip';
+              }
+              if (normalizedId.includes('/node_modules/opencc-js/')) {
+                return 'dep-opencc';
+              }
+              if (normalizedId.includes('/node_modules/naive-ui/')) {
+                return 'dep-naive';
+              }
+              return 'vendor';
+            }
+            return undefined;
+          },
+        },
+      },
+    },
+    optimizeDeps: {
+      exclude: ['@novelia/web-kit'],
+    },
+    server: {
+      allowedHosts: true,
+      proxy: {
+        '/auth-proxy/': {
+          target: 'https://auth.novelia.cc',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/auth-proxy/, ''),
+        },
+        '/api': {
+          target: apiUrl,
+          changeOrigin: true,
+          bypass: (req, _res, _options) => {
+            if (!isLocalApi && req.url && req.url.includes('/translate-v2/')) {
+              console.log('检测到小说章节翻译请求，已拦截');
+              return false;
+            }
+          },
+        },
+        '/files-temp': {
+          target: apiUrl,
+          changeOrigin: true,
+        },
+      },
+    },
+    resolve: {
+      alias: {
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
+      },
+    },
+    plugins: [
+      vue(),
+      tailwindcss(),
+      htmlBootstrapPlugin({ analytics: 'G-QD8MZ90XFJ' }),
+      AutoImport({
+        dts: 'src/auto-imports.d.ts',
+        ignore: ['h'],
+        imports: [
+          'vue',
+          'vue-router',
+          'pinia',
+          {
+            'naive-ui': [
+              'useDialog',
+              'useNotification',
+              'useLoadingBar',
+              'useThemeVars',
+            ],
+          },
+        ],
+      }),
+      Components({
+        dts: 'src/components.d.ts',
+        dirs: ['src/**/components/**'],
+        resolvers: [NaiveUiResolver()],
+      }),
+    ],
+  };
+
+  if (enableSonda) {
+    config.build!.sourcemap = true;
+    config.plugins!.push(
+      Sonda({
+        gzip: true,
+        brotli: true,
+      }),
+    );
+  }
+
+  // 注入代理能力以解决系统代理时的外网访问问题
+  // ProxyAgent 会自动使用系统代理设置，如果没有系统代理则直接连接目标服务器
+  const upstreamAgent = new ProxyAgent();
+  const proxy = config.server!.proxy!;
+  Object.entries(proxy).forEach(([key, proxyConfig]) => {
+    if (typeof proxyConfig === 'object') {
+      proxyConfig.agent = upstreamAgent;
+    } else {
+      proxy[key] = {
+        target: proxyConfig,
+        changeOrigin: true,
+        agent: upstreamAgent,
+      };
+    }
+  });
+
+  return config;
+});

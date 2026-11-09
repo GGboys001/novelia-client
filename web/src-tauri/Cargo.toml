@@ -1,0 +1,41 @@
+[package]
+name = "novelia"
+version = "0.1.0"
+description = "Novelia 轻小说客户端"
+authors = ["Novelia Client Contributors"]
+license = "GPL-3.0-only"
+repository = ""
+edition = "2024"
+rust-version = "1.90"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "novelia_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.12.5", features = [] }
+tauri-plugin-log = "2"
+axum = "0.8"
+reqwest = { version = "0.12", default-features = false, features = [
+    "cookies",
+    "rustls-tls",
+    "http2",
+    "gzip",
+    "brotli",
+    "deflate",
+    "socks",
+] }
+tokio = { version = "1", features = ["net", "rt-multi-thread", "time"] }
+http = "1"
+cookie_store = "0.22"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"

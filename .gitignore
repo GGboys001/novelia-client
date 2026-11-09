@@ -1,0 +1,25 @@
+node_modules/
+dist/
+*.log
+.env
+.env.*
+.DS_Store
+
+# Tauri / Rust
+web/src-tauri/target/
+web/src-tauri/gen/schemas/
+web/src-tauri/binaries/
+**/*.exe
+**/*.apk
+**/*.aab
+**/*.so
+
+# Android build output
+web/src-tauri/gen/android/.gradle/
+web/src-tauri/gen/android/.kotlin/
+web/src-tauri/gen/android/build/
+web/src-tauri/gen/android/app/build/
+web/src-tauri/gen/android/app/src/main/jniLibs/
+web/src-tauri/gen/android/app/libs/*.aar
+web/src-tauri/gen/android/local.properties
+web/src-tauri/gen/android/tauri.settings.gradle

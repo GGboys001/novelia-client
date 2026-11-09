@@ -1,0 +1,267 @@
+<script lang="ts" setup>
+import { Toast, XDialog } from '@novelia/web-kit';
+
+import { FavoredRepo, useLocalVolumeStore, useSettingStore } from '@/stores';
+import { useShouldTopJob } from '@/util';
+import { useBookshelfLocalStore } from '../BookshelfLocalStore';
+
+const props = defineProps<{
+  selectedIds: string[];
+  favoredId: string;
+}>();
+defineEmits<{
+  selectAll: [];
+  invertSelection: [];
+}>();
+
+const settingStore = useSettingStore();
+const { setting } = storeToRefs(settingStore);
+
+const store = useBookshelfLocalStore();
+
+// 删除小说
+const showDeleteModal = ref(false);
+
+const openDeleteModal = () => {
+  const ids = props.selectedIds;
+  if (ids.length === 0) {
+    Toast.info('没有选中小说');
+    return;
+  }
+  showDeleteModal.value = true;
+};
+
+const deleteSelected = async () => {
+  const ids = props.selectedIds;
+  const { success, failed } = await store.deleteVolumes(ids);
+  Toast.info(`${success}本小说被删除，${failed}本失败`);
+};
+
+const downloadSelected = async () => {
+  const ids = props.selectedIds;
+  if (ids.length === 0) {
+    Toast.info('没有选中小说');
+    return;
+  }
+  const { success, failed } = await store.downloadVolumes(ids);
+  Toast.info(`${success}本小说机翻被打包，${failed}本失败`);
+};
+
+const downloadRawSelected = async () => {
+  const ids = props.selectedIds;
+  if (ids.length === 0) {
+    Toast.info('没有选中小说');
+    return;
+  }
+  const { success, failed } = await store.downloadRawVolumes(ids);
+  Toast.info(`${success}本小说原文被打包，${failed}本失败`);
+};
+
+// 移动小说
+const favoredStore = FavoredRepo.useFavoredStore();
+const { favoreds } = storeToRefs(favoredStore);
+
+const targetFavoredId = ref(props.favoredId);
+watch(
+  () => props.favoredId,
+  (favoredId) => {
+    targetFavoredId.value = favoredId;
+    showDeleteModal.value = false;
+  },
+);
+
+const moveToFavored = async () => {
+  const novels = props.selectedIds;
+  if (novels.length === 0) {
+    Toast.info('没有选中小说');
+    return;
+  }
+
+  if (targetFavoredId.value === props.favoredId) {
+    Toast.info('无需移动');
+    return;
+  }
+
+  const favoredId = targetFavoredId.value;
+  const localVolumeRepository = await useLocalVolumeStore();
+
+  let failed = 0;
+  for (const volumeId of novels) {
+    try {
+      await localVolumeRepository.updateFavoredId(volumeId, favoredId);
+    } catch (e) {
+      failed += 1;
+    }
+  }
+  const success = novels.length - failed;
+
+  Toast.info(`${success}本小说已移动，${failed}本失败`);
+  await store.loadVolumes();
+};
+
+// 生成翻译任务
+const translateLevel = ref<'expire' | 'all'>('expire');
+const reverseOrder = ref(false);
+const shouldTopJob = useShouldTopJob();
+
+const queueJobs = (type: 'gpt' | 'sakura') => {
+  let ids = props.selectedIds;
+  if (ids.length === 0) {
+    Toast.info('没有选中小说');
+    return;
+  }
+
+  if (reverseOrder.value) {
+    ids = ids.slice().reverse();
+  }
+
+  const { success, failed } = store.queueJobsToWorkspace(ids, {
+    level: translateLevel.value,
+    type,
+    shouldTop: shouldTopJob.value ?? false,
+  });
+  Toast.info(`${success}本小说已排队，${failed}本失败`);
+};
+</script>
+
+<template>
+  <n-list bordered>
+    <n-list-item>
+      <n-flex vertical>
+        <n-flex align="baseline">
+          <n-button-group size="small">
+            <c-button
+              label="全选"
+              :round="false"
+              @action="$emit('selectAll')"
+            />
+            <c-button
+              label="反选"
+              :round="false"
+              @action="$emit('invertSelection')"
+            />
+          </n-button-group>
+
+          <n-button-group size="small">
+            <c-button
+              label="下载原文"
+              :round="false"
+              @action="downloadRawSelected"
+            />
+            <c-button
+              label="下载机翻"
+              :round="false"
+              @action="downloadSelected"
+            />
+            <DownloadOptionsButton size="small" :round="false" />
+          </n-button-group>
+
+          <c-button
+            label="删除"
+            secondary
+            :round="false"
+            size="small"
+            type="error"
+            @click="openDeleteModal"
+          />
+          <XDialog
+            :title="`确定删除 ${
+              selectedIds.length === 1
+                ? selectedIds[0]
+                : `${selectedIds.length}本小说`
+            }？`"
+            v-model:open="showDeleteModal"
+            class="w-[600px]"
+          >
+            <template #footer>
+              <c-button label="确定" type="primary" @action="deleteSelected" />
+            </template>
+          </XDialog>
+        </n-flex>
+
+        <n-text depth="3">已选择{{ selectedIds.length }}本小说</n-text>
+      </n-flex>
+    </n-list-item>
+
+    <n-list-item v-if="favoreds.local.length > 1">
+      <n-flex vertical>
+        <b>移动小说</b>
+
+        <n-radio-group v-model:value="targetFavoredId">
+          <n-flex align="center">
+            <c-button
+              label="移动"
+              size="small"
+              :round="false"
+              @action="moveToFavored"
+            />
+
+            <n-radio
+              v-for="favored in favoreds.local"
+              :key="favored.id"
+              :value="favored.id"
+            >
+              {{ favored.title }}
+            </n-radio>
+          </n-flex>
+        </n-radio-group>
+      </n-flex>
+    </n-list-item>
+
+    <n-list-item
+      v-if="
+        setting.enabledTranslator.includes('gpt') ||
+        setting.enabledTranslator.includes('sakura')
+      "
+    >
+      <n-flex vertical>
+        <b>生成翻译任务</b>
+
+        <c-action-wrapper title="选项">
+          <n-flex size="small">
+            <n-tooltip trigger="hover">
+              <template #trigger>
+                <n-flex :size="0" :wrap="false">
+                  <tag-button
+                    label="过期"
+                    :checked="translateLevel === 'expire'"
+                    @update:checked="translateLevel = 'expire'"
+                  />
+                  <tag-button
+                    label="重翻"
+                    type="warning"
+                    :checked="translateLevel === 'all'"
+                    @update:checked="translateLevel = 'all'"
+                  />
+                </n-flex>
+              </template>
+              过期：翻译术语表过期的章节
+              <br />
+              重翻：重翻全部章节
+              <br />
+            </n-tooltip>
+
+            <tag-button label="倒序添加" v-model:checked="reverseOrder" />
+          </n-flex>
+        </c-action-wrapper>
+
+        <c-action-wrapper title="操作">
+          <n-button-group size="small">
+            <c-button
+              v-if="setting.enabledTranslator.includes('gpt')"
+              label="排队GPT"
+              :round="false"
+              @action="queueJobs('gpt')"
+            />
+            <c-button
+              v-if="setting.enabledTranslator.includes('sakura')"
+              label="排队Sakura"
+              :round="false"
+              @action="queueJobs('sakura')"
+            />
+          </n-button-group>
+        </c-action-wrapper>
+      </n-flex>
+    </n-list-item>
+  </n-list>
+</template>

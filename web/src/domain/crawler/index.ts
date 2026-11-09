@@ -1,0 +1,153 @@
+import { isEqual } from 'lodash-es';
+
+import { WebNovelApi } from '@/api';
+import type { WebNovelChapter, WebNovelMetadata } from '@/external';
+import { WebNovelCrawlerApi } from '@/external';
+import type { WebNovelDto } from '@/model/WebNovel';
+import { WebNovelRepo } from '@/repos';
+import { useWhoamiStore } from '@/stores';
+
+import { classifyTocUpdate } from './TocUpdate';
+
+export interface CrawlerUpdateOptions {
+  signal?: AbortSignal;
+  canUpdate?: () => boolean;
+}
+
+const checkUpdateAllowed = (options?: CrawlerUpdateOptions) => {
+  if (options?.signal?.aborted || options?.canUpdate?.() === false) {
+    throw new DOMException('爬虫任务已停止', 'AbortError');
+  }
+};
+
+const toMutationBody = (metadata: WebNovelMetadata) => ({
+  title: metadata.title,
+  authors: metadata.authors.map((author) => ({
+    name: author.name,
+    link: author.link ?? null,
+  })),
+  type: metadata.type,
+  attentions: metadata.attentions,
+  keywords: metadata.keywords,
+  points: metadata.points ?? null,
+  totalCharacters: metadata.totalCharacters,
+  introduction: metadata.introduction,
+  toc: metadata.toc.map((item) => ({
+    title: item.title,
+    chapterId: item.chapterId ?? null,
+    createAt: item.createAt ?? null,
+  })),
+});
+
+const toCurrentMutationBody = (novel: WebNovelDto) => ({
+  title: novel.titleJp,
+  authors: novel.authors.map((author) => ({
+    name: author.name,
+    link: author.link ?? null,
+  })),
+  type: novel.type as WebNovelMetadata['type'],
+  attentions: novel.attentions as WebNovelMetadata['attentions'],
+  keywords: novel.keywords,
+  points: novel.points ?? null,
+  totalCharacters: novel.totalCharacters ?? 0,
+  introduction: novel.introductionJp,
+  toc: novel.toc.map((item) => ({
+    title: item.titleJp,
+    chapterId: item.chapterId ?? null,
+    createAt:
+      item.createAt != null
+        ? new Date(item.createAt * 1000).toISOString()
+        : null,
+  })),
+});
+
+const updateWebNovel = async (
+  providerId: string,
+  novelId: string,
+  current?: WebNovelDto,
+  options?: CrawlerUpdateOptions & { safeUpdateToc?: boolean },
+) => {
+  checkUpdateAllowed(options);
+  const safeUpdateToc = options?.safeUpdateToc ?? true;
+  const metadata = await WebNovelCrawlerApi.getMetadata(providerId, novelId);
+  checkUpdateAllowed(options);
+  const body = toMutationBody(metadata);
+  current ??= await WebNovelApi.getNovel(providerId, novelId);
+  const currentBody = toCurrentMutationBody(current);
+
+  const { whoami } = useWhoamiStore();
+  const newChapterIds = body.toc.flatMap((item) =>
+    item.chapterId == null ? [] : [item.chapterId],
+  );
+
+  if (newChapterIds.length === 0) {
+    throw new Error('未获取到目录，请手动打开源站确保你有办法访问');
+  }
+
+  if (!whoami.isAdmin) {
+    if (body.toc.length < current.toc.length) {
+      throw new Error('目录变短，放弃更新，请手动打开源站确保你有办法访问');
+    }
+  }
+
+  if (isEqual(body, currentBody)) {
+    throw new Error('没有必要更新');
+  }
+
+  if (safeUpdateToc) {
+    const tocUpdateKind = classifyTocUpdate(currentBody.toc, body.toc);
+    if (tocUpdateKind === 'existing-updated') {
+      throw new Error('已有目录发生变化，非源站同步模式仅允许新增章节');
+    }
+    if (tocUpdateKind === 'unchanged') {
+      throw new Error('没有新增章节，放弃更新');
+    }
+  }
+
+  checkUpdateAllowed(options);
+  await WebNovelRepo.updateNovel(providerId, novelId, body);
+};
+
+const updateWebNovelChapter = async (
+  providerId: string,
+  novelId: string,
+  chapterId: string,
+  force: boolean,
+  options?: CrawlerUpdateOptions,
+) => {
+  checkUpdateAllowed(options);
+  const chapter = await WebNovelCrawlerApi.getChapter(
+    providerId,
+    novelId,
+    chapterId,
+  );
+  const body = toChapterMutationBody(chapter);
+  checkUpdateAllowed(options);
+
+  if (!force) {
+    await WebNovelRepo.createChapter(providerId, novelId, chapterId, body);
+    return 'updated' as const;
+  }
+
+  try {
+    await WebNovelRepo.updateChapter(providerId, novelId, chapterId, body);
+    return 'updated' as const;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.includes('404') || message.includes('章节不存在')) {
+      checkUpdateAllowed(options);
+      await WebNovelRepo.createChapter(providerId, novelId, chapterId, body);
+      return 'created' as const;
+    }
+    throw e;
+  }
+};
+
+const toChapterMutationBody = (chapter: WebNovelChapter) => ({
+  paragraphs: chapter.paragraphs,
+});
+
+export const CrawlerService = {
+  updateWebNovel,
+  updateWebNovelChapter,
+};

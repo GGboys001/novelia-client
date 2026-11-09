@@ -1,0 +1,124 @@
+<script lang="ts" setup>
+import NovelListSkeleton from '@/components/NovelListSkeleton.vue';
+import {
+  XEmpty,
+  XError,
+  XPagination,
+  XSeparator,
+  XPage,
+  XPageHeader,
+} from '@novelia/web-kit';
+
+import { WebNovelRepo } from '@/repos';
+import { FavoredRepo, useWhoamiStore } from '@/stores';
+import type { WebListValue } from './option';
+import {
+  getWebListOptions,
+  onUpdateListValue,
+  onUpdatePage,
+  parseWebListValueProvider,
+} from './option';
+
+const props = defineProps<{
+  page: number;
+  query: string;
+  selected: number[];
+}>();
+
+const whoamiStore = useWhoamiStore();
+const { whoami } = storeToRefs(whoamiStore);
+
+const favoredStore = FavoredRepo.useFavoredStore();
+const { favoreds } = storeToRefs(favoredStore);
+
+const listOptions = computed(() =>
+  getWebListOptions(whoami.value.hasNsfwAccess),
+);
+
+const listValue = computed(
+  () =>
+    <WebListValue>{
+      搜索: props.query,
+      来源: props.selected[0] ?? 0xff,
+      类型: props.selected[1] ?? 0,
+      分级: props.selected[2] ?? (whoami.value.hasNsfwAccess ? 0 : 1),
+      翻译: props.selected[3] ?? 0,
+      排序: props.selected[4] ?? 0,
+    },
+);
+
+const { data: novelPage, error } = WebNovelRepo.useWebNovelList(
+  () => props.page,
+  () => ({
+    query: listValue.value.搜索,
+    provider: parseWebListValueProvider(listValue.value.来源),
+    type: listValue.value.类型,
+    level: listValue.value.分级,
+    translate: listValue.value.翻译,
+    sort: listValue.value.排序,
+  }),
+);
+
+// 翻页加载期间保留总页数，避免上下分页被卸载。
+const pageCount = computed<number>(
+  (previous) => novelPage.value?.pageNumber ?? previous ?? 1,
+);
+
+watch(novelPage, (novelPage) => {
+  if (novelPage) {
+    const favoredIds = favoreds.value.web.map((it) => it.id);
+    for (const item of novelPage.items) {
+      if (item.favored && !favoredIds.includes(item.favored)) {
+        item.favored = undefined;
+      }
+    }
+  }
+});
+</script>
+
+<template>
+  <XPage role="region" aria-label="网络小说列表">
+    <XPageHeader title="网络小说" />
+
+    <ListFilter
+      :options="listOptions"
+      :value="listValue"
+      @update:value="onUpdateListValue(listOptions, $event)"
+    />
+
+    <XPagination
+      v-if="pageCount > 1"
+      class="mt-6"
+      :ui="{ root: 'border-t-0 p-0 sm:px-0' }"
+      :page="page"
+      :total-pages="pageCount"
+      @update:page="onUpdatePage"
+    />
+
+    <XSeparator :style="{ margin: pageCount > 1 ? '12px 0 0' : '24px 0 0' }" />
+
+    <NovelListSkeleton v-if="!novelPage && !error" />
+    <XError
+      v-else-if="!novelPage && error"
+      title="加载错误"
+      :description="error.message"
+    />
+    <XEmpty
+      v-else-if="novelPage && novelPage.items.length === 0"
+      class="mt-3"
+      title="空列表"
+      size="compact"
+    />
+    <template v-else-if="novelPage">
+      <NovelListWeb :items="novelPage.items" />
+    </template>
+
+    <XPagination
+      v-if="pageCount > 1"
+      :page="page"
+      :total-pages="pageCount"
+      keyboard="window"
+      @update:page="onUpdatePage"
+    />
+  </XPage>
+</template>

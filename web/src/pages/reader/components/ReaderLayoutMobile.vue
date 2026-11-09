@@ -1,0 +1,145 @@
+<script lang="ts" setup>
+import { XDrawer } from '@novelia/web-kit';
+import {
+  ArrowBackIosOutlined,
+  ArrowForwardIosOutlined,
+  FormatListBulletedOutlined,
+  LibraryBooksOutlined,
+  TuneOutlined,
+} from '@vicons/material';
+
+import type { WebNovelChapterDto } from '@/model/WebNovel';
+import { useReaderSettingStore } from '@/stores';
+
+defineProps<{
+  novelUrl?: string;
+  chapter: WebNovelChapterDto;
+}>();
+
+const emit = defineEmits<{
+  nav: [string];
+  requireCatalogModal: [];
+  requireSettingModal: [];
+}>();
+
+const showMenu = ref(false);
+
+// 先关闭抽屉，避免其模态交互和滚动锁影响外部弹窗。
+const openCatalogModal = () => {
+  showMenu.value = false;
+  emit('requireCatalogModal');
+};
+
+const openSettingModal = () => {
+  showMenu.value = false;
+  emit('requireSettingModal');
+};
+
+const readerSettingStore = useReaderSettingStore();
+const { readerSetting } = storeToRefs(readerSettingStore);
+
+const onGlobalClick = (event: MouseEvent) => {
+  const scrollBy = (y: number) => {
+    window.scrollBy({
+      top: y * window.innerHeight,
+      behavior: readerSetting.value.enableClickAnimition ? 'smooth' : 'instant',
+    });
+  };
+
+  const scrollByIfNeed = (p: number) => {
+    const t = 0.3;
+    const distance = 0.8;
+    if (p < t) {
+      scrollBy(-distance);
+    } else if (p > 1 - t) {
+      scrollBy(distance);
+    } else {
+      showMenu.value = true;
+    }
+  };
+
+  if (
+    readerSetting.value.clickArea === 'default' ||
+    readerSetting.value.clickArea === 'up-down'
+  ) {
+    const py = event.clientY / window.innerHeight;
+    scrollByIfNeed(py);
+  } else if (readerSetting.value.clickArea === 'left-right') {
+    const px = event.clientX / window.innerWidth;
+    scrollByIfNeed(px);
+  } else {
+    showMenu.value = true;
+  }
+};
+</script>
+
+<template>
+  <div @click="onGlobalClick">
+    <slot />
+  </div>
+
+  <XDrawer
+    v-model:open="showMenu"
+    title="阅读菜单"
+    size="auto"
+    side="bottom"
+    @open-auto-focus.prevent
+  >
+    <n-flex
+      :size="0"
+      style="
+        width: 100%;
+        margin-top: 4px;
+        margin-bottom: 4px;
+        padding-bottom: env(safe-area-inset-bottom);
+      "
+    >
+      <div style="flex: 1 1 0px">
+        <side-button
+          quaternary
+          :disabled="!chapter.prevId"
+          text="上一章"
+          :icon="ArrowBackIosOutlined"
+          @click="emit('nav', chapter.prevId!)"
+          style="width: 100%"
+        />
+      </div>
+      <router-link v-if="novelUrl" :to="novelUrl" style="flex: 1">
+        <side-button
+          quaternary
+          text="详情"
+          :icon="LibraryBooksOutlined"
+          style="width: 100%"
+        />
+      </router-link>
+      <div style="flex: 1 1 0px">
+        <side-button
+          quaternary
+          text="目录"
+          :icon="FormatListBulletedOutlined"
+          @click="openCatalogModal"
+          style="width: 100%"
+        />
+      </div>
+      <div style="flex: 1 1 0px">
+        <side-button
+          quaternary
+          text="设置"
+          :icon="TuneOutlined"
+          @click="openSettingModal"
+          style="width: 100%"
+        />
+      </div>
+      <div style="flex: 1 1 0px">
+        <side-button
+          quaternary
+          :disabled="!chapter.nextId"
+          text="下一章"
+          :icon="ArrowForwardIosOutlined"
+          @click="emit('nav', chapter.nextId!)"
+          style="width: 100%"
+        />
+      </div>
+    </n-flex>
+  </XDrawer>
+</template>

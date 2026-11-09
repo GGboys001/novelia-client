@@ -1,0 +1,168 @@
+<script lang="ts" setup>
+import { Toast, XDialog } from '@novelia/web-kit';
+import type { FormInst, FormItemRule, FormRules } from 'naive-ui';
+
+import type { SakuraWorker } from '@/model/Translator';
+import { useSakuraWorkspaceStore } from '@/stores';
+
+const props = defineProps<{
+  show: boolean;
+  worker?: SakuraWorker;
+}>();
+const emit = defineEmits<{
+  'update:show': [boolean];
+}>();
+
+const workspace = useSakuraWorkspaceStore();
+const workspaceRef = workspace.ref;
+const initFormValue = () => ({
+  id: props.worker?.id ?? '',
+  endpoint: props.worker?.endpoint ?? '',
+  concurrency: props.worker?.concurrency ?? 1,
+});
+
+const formRef = useTemplateRef<FormInst>('form');
+const formValue = ref(initFormValue());
+watch(
+  () => props.show,
+  (show) => {
+    if (show) formValue.value = initFormValue();
+  },
+);
+const formRules: FormRules = {
+  id: [
+    {
+      validator: (rule: FormItemRule, value: string) => value.trim().length > 0,
+      message: '名字不能为空',
+      trigger: 'input',
+    },
+    {
+      validator: (rule: FormItemRule, value: string) =>
+        workspaceRef.value.workers
+          .filter(({ id }) => id !== props.worker?.id)
+          .find(({ id }) => id === value) === undefined,
+      message: '名字不能重复',
+      trigger: 'input',
+    },
+  ],
+  endpoint: [
+    {
+      validator: (rule: FormItemRule, value: string) => value.trim().length > 0,
+      message: 'API端点不能为空',
+      trigger: 'input',
+    },
+    {
+      validator: (rule: FormItemRule, value: string) => {
+        try {
+          const url = new URL(value);
+          return url.protocol === 'http:' || url.protocol === 'https:';
+        } catch (_) {
+          return false;
+        }
+      },
+      message: 'API端点不合法',
+      trigger: 'input',
+    },
+  ],
+};
+
+const doValidate = async () => {
+  const validated = await new Promise<boolean>(function (resolve, _reject) {
+    formRef.value?.validate((errors) => {
+      if (errors) resolve(false);
+      else resolve(true);
+    });
+  });
+  return validated;
+};
+
+const buildWorker = () => {
+  const worker = { ...formValue.value };
+  worker.id = worker.id.trim();
+  worker.endpoint = worker.endpoint.trim();
+  return worker;
+};
+
+const submit = async () => {
+  if (!(await doValidate())) return;
+  const worker = buildWorker();
+
+  if (props.worker === undefined) {
+    workspace.addWorker(worker);
+    Toast.success(`已添加翻译器「${worker.id}」`);
+    emit('update:show', false);
+  } else {
+    const index = workspaceRef.value.workers.findIndex(
+      ({ id }) => id === props.worker?.id,
+    );
+    workspaceRef.value.workers[index] = worker;
+    Toast.success(`已更新翻译器「${worker.id}」`);
+    emit('update:show', false);
+  }
+};
+
+const submitAndContinue = async () => {
+  if (!(await doValidate())) return;
+  const worker = buildWorker();
+  workspace.addWorker(worker);
+  Toast.success(`已添加翻译器「${worker.id}」`);
+};
+
+const verb = computed(() => (props.worker === undefined ? '添加' : '更新'));
+</script>
+
+<template>
+  <XDialog
+    :open="show"
+    @update:open="$emit('update:show', $event)"
+    :title="verb + 'Sakura翻译器'"
+    class="w-150"
+  >
+    <n-form
+      ref="form"
+      :model="formValue"
+      :rules="formRules"
+      label-placement="left"
+      label-width="auto"
+    >
+      <n-form-item-row path="id" label="名字">
+        <n-input
+          v-model:value="formValue.id"
+          placeholder="给你的翻译器起个名字"
+          :input-props="{ spellcheck: false }"
+        />
+      </n-form-item-row>
+      <n-form-item-row path="endpoint" label="API端点">
+        <n-input
+          v-model:value="formValue.endpoint"
+          placeholder="翻译器的API端点"
+          :input-props="{ spellcheck: false }"
+        />
+      </n-form-item-row>
+
+      <n-form-item-row path="concurrency" label="并发数">
+        <n-input-number
+          :value="formValue.concurrency"
+          :min="1"
+          :max="100"
+          :precision="0"
+          @update:value="(value) => (formValue.concurrency = value ?? 1)"
+        />
+      </n-form-item-row>
+
+      <n-text depth="3" class="text-[12px]!">
+        # 分段长度与前文长度固定为500字符，不支持配置
+        <br />
+        # API端点例子：http://127.0.0.1:8080
+      </n-text>
+    </n-form>
+
+    <template #footer>
+      <n-flex v-if="props.worker === undefined" :size="12">
+        <c-button label="添加并继续" @action="submitAndContinue" />
+        <c-button label="添加" type="primary" @action="submit" />
+      </n-flex>
+      <c-button v-else label="更新" type="primary" @action="submit" />
+    </template>
+  </XDialog>
+</template>
