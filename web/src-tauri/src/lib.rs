@@ -209,6 +209,7 @@ struct AppState {
     ech: Arc<Mutex<Option<EchSidecar>>>,
     api_base: String,
     auth_base: String,
+    forum_base: String,
 }
 
 fn ech_binary_path() -> Option<PathBuf> {
@@ -628,6 +629,9 @@ async fn proxy(State(state): State<AppState>, request: Request<Body>) -> Respons
         (&state.api_base, format!("/api{rest}"))
     } else if let Some(rest) = path.strip_prefix("/auth") {
         (&state.auth_base, rest.to_string())
+    } else if let Some(rest) = path.strip_prefix("/forum") {
+        // 评论等论坛接口走本地代理，避免 WebView 页面来源（tauri.localhost）被 CORS 拦截。
+        (&state.forum_base, rest.to_string())
     } else {
         return text_response(StatusCode::NOT_FOUND, "未知的代理路径", origin);
     };
@@ -852,6 +856,7 @@ pub fn run() {
                 ech: Arc::new(Mutex::new(ech_state)),
                 api_base: "https://n.novelia.cc".to_owned(),
                 auth_base: "https://auth.novelia.cc".to_owned(),
+                forum_base: "https://forum.novelia.cc".to_owned(),
             };
 
             app.manage(state.clone());
@@ -875,6 +880,7 @@ pub fn run() {
                         value: Object.freeze({{ \
                             apiBase: 'http://127.0.0.1:{port}/api/', \
                             authBase: 'http://127.0.0.1:{port}/auth/', \
+                            forumApiBase: 'http://127.0.0.1:{port}/forum/', \
                             echAvailable: true \
                         }}), \
                         configurable: false \
@@ -889,13 +895,26 @@ pub fn run() {
   if (window.__noveliaForumBridge) return;
   window.__noveliaForumBridge = true;
   var SESSION_KEY = 'web-kit:session:v1';
+  var ORIGIN_KEY = 'novelia:app-origin';
   var FORUM_HOST = 'forum.novelia.cc';
+  var APP_ORIGIN_FALLBACK = 'http://tauri.localhost';
 
   if (location.hostname === FORUM_HOST) {
+    var appOrigin = APP_ORIGIN_FALLBACK;
     try {
-      var match = /novelia-session=([^&]+)/.exec(location.hash);
-      if (match) {
-        localStorage.setItem(SESSION_KEY, decodeURIComponent(match[1]));
+      var sessionMatch = /novelia-session=([^&]+)/.exec(location.hash);
+      if (sessionMatch) {
+        localStorage.setItem(SESSION_KEY, decodeURIComponent(sessionMatch[1]));
+      }
+      var originMatch = /novelia-origin=([^&]+)/.exec(location.hash);
+      if (originMatch) {
+        appOrigin = decodeURIComponent(originMatch[1]);
+        localStorage.setItem(ORIGIN_KEY, appOrigin);
+      } else {
+        var storedOrigin = localStorage.getItem(ORIGIN_KEY);
+        if (storedOrigin) appOrigin = storedOrigin;
+      }
+      if (sessionMatch || originMatch) {
         history.replaceState(null, '', location.pathname + location.search);
       }
     } catch (error) {}
@@ -909,6 +928,19 @@ pub fn run() {
     };
     if (document.head) append();
     else document.addEventListener('DOMContentLoaded', append, { once: true });
+
+    // 论坛里指向小说站的链接要回到应用内的 SPA，直接加载远程站点会丢掉
+    // 客户端布局、安全区适配和本地代理。
+    document.addEventListener('click', function (event) {
+      var anchor = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+      if (!anchor) return;
+      var url;
+      try { url = new URL(anchor.href, location.href); } catch (error) { return; }
+      if (url.hostname !== 'n.novelia.cc' && url.hostname !== 'novelia.cc') return;
+      event.preventDefault();
+      event.stopPropagation();
+      location.href = appOrigin + url.pathname + url.search + url.hash;
+    }, true);
     return;
   }
 
@@ -920,8 +952,9 @@ pub fn run() {
     if (url.hostname !== FORUM_HOST) return;
     var session = null;
     try { session = localStorage.getItem(SESSION_KEY); } catch (error) {}
-    if (!session) return;
-    url.hash = 'novelia-session=' + encodeURIComponent(session);
+    var hash = 'novelia-origin=' + encodeURIComponent(location.origin);
+    if (session) hash += '&novelia-session=' + encodeURIComponent(session);
+    url.hash = hash;
     event.preventDefault();
     event.stopPropagation();
     location.href = url.toString();

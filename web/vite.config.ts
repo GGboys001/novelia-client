@@ -33,6 +33,10 @@ export default defineConfig(({ command, mode }) => {
   const clientApiBase = isAndroid
     ? 'http://127.0.0.1:43110/api/'
     : '/api/';
+  // 评论等论坛接口在客户端经本地代理转发，浏览器版仍直连官方域名。
+  const clientForumBase = isAndroid
+    ? 'http://127.0.0.1:43110/forum/'
+    : 'https://forum.novelia.cc/';
   const clientAuthBase = isAndroid
     ? 'http://127.0.0.1:43110/auth/'
     : isServe
@@ -42,6 +46,7 @@ export default defineConfig(({ command, mode }) => {
     define: {
       __API_BASE__: JSON.stringify(clientApiBase),
       __AUTH_URL__: JSON.stringify(clientAuthBase),
+      __FORUM_API_BASE__: JSON.stringify(clientForumBase),
       __ECH_AVAILABLE__: JSON.stringify(isAndroid),
       __APP_VERSION__: JSON.stringify(appVersion),
       __BUILD_TIME__: JSON.stringify(

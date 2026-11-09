@@ -138,13 +138,26 @@ class MainActivity : TauriActivity() {
         if (window.__noveliaForumBridge) return;
         window.__noveliaForumBridge = true;
         const SESSION_KEY = 'web-kit:session:v1';
+        const ORIGIN_KEY = 'novelia:app-origin';
         const FORUM_HOST = 'forum.novelia.cc';
+        const APP_ORIGIN_FALLBACK = 'http://tauri.localhost';
 
         if (location.hostname === FORUM_HOST) {
+          let appOrigin = APP_ORIGIN_FALLBACK;
           try {
-            const match = /novelia-session=([^&]+)/.exec(location.hash);
-            if (match) {
-              localStorage.setItem(SESSION_KEY, decodeURIComponent(match[1]));
+            const sessionMatch = /novelia-session=([^&]+)/.exec(location.hash);
+            if (sessionMatch) {
+              localStorage.setItem(SESSION_KEY, decodeURIComponent(sessionMatch[1]));
+            }
+            const originMatch = /novelia-origin=([^&]+)/.exec(location.hash);
+            if (originMatch) {
+              appOrigin = decodeURIComponent(originMatch[1]);
+              localStorage.setItem(ORIGIN_KEY, appOrigin);
+            } else {
+              const storedOrigin = localStorage.getItem(ORIGIN_KEY);
+              if (storedOrigin) appOrigin = storedOrigin;
+            }
+            if (sessionMatch || originMatch) {
               history.replaceState(null, '', location.pathname + location.search);
             }
           } catch (error) {}
@@ -158,6 +171,21 @@ class MainActivity : TauriActivity() {
           };
           if (document.head) append();
           else document.addEventListener('DOMContentLoaded', append, { once: true });
+
+          // 论坛里指向小说站的链接要回到应用内的 SPA，直接加载远程站点会丢掉
+          // 客户端布局、安全区适配和本地代理。
+          document.addEventListener('click', (event) => {
+            const anchor = event.target && event.target.closest
+              ? event.target.closest('a[href]')
+              : null;
+            if (!anchor) return;
+            let url;
+            try { url = new URL(anchor.href, location.href); } catch (error) { return; }
+            if (url.hostname !== 'n.novelia.cc' && url.hostname !== 'novelia.cc') return;
+            event.preventDefault();
+            event.stopPropagation();
+            location.href = appOrigin + url.pathname + url.search + url.hash;
+          }, true);
           return;
         }
 
@@ -171,8 +199,9 @@ class MainActivity : TauriActivity() {
           if (url.hostname !== FORUM_HOST) return;
           let session = null;
           try { session = localStorage.getItem(SESSION_KEY); } catch (error) {}
-          if (!session) return;
-          url.hash = 'novelia-session=' + encodeURIComponent(session);
+          let hash = 'novelia-origin=' + encodeURIComponent(location.origin);
+          if (session) hash += '&novelia-session=' + encodeURIComponent(session);
+          url.hash = hash;
           event.preventDefault();
           event.stopPropagation();
           location.href = url.toString();

@@ -1,6 +1,8 @@
 export interface NoveliaRuntime {
   apiBase: string;
   authBase: string;
+  /** 论坛接口基址；客户端经本地代理转发，浏览器版留空走官方域名。 */
+  forumApiBase?: string;
   echAvailable?: boolean;
 }
 
