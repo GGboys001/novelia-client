@@ -167,7 +167,7 @@ const setIndentSize = (diff: number) => {
                 <n-slider
                   :to="`#${popupTargetId}`"
                   v-model:value="readerSetting.fontSize"
-                  :min="14"
+                  :min="12"
                   :max="40"
                   style="flex: auto"
                   :format-tooltip="(value: number) => `${value}px`"
@@ -219,6 +219,7 @@ const setIndentSize = (diff: number) => {
                   <c-radio-group
                     v-model:value="readerSetting.theme.mode"
                     :options="ReaderSetting.themeModeOptions"
+                    class="radio-wrap"
                   />
                   <template v-if="readerSetting.theme.mode === 'custom'">
                     <n-flex>

@@ -131,6 +131,7 @@ const { theme } = useWebKit();
             v-model:value="networkMode"
             :options="networkModeOptions"
             size="small"
+            class="radio-wrap"
           />
           <span v-if="networkMode === 'ech'" class="text-xs opacity-60">
             ECH 模式由本地侧车完成握手，失败时请切换系统代理或手动代理。
