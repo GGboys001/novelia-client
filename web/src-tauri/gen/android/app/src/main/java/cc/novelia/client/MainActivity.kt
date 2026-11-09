@@ -1,9 +1,12 @@
 package cc.novelia.client
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
@@ -38,11 +41,84 @@ class MainActivity : TauriActivity() {
   override fun onWebViewCreate(webView: WebView) {
     Log.i("NoveliaInsets", "onWebViewCreate")
     this.webView = webView
+    installExternalLinks(webView)
     val root = window.decorView
     ViewCompat.getRootWindowInsets(root)?.let { applyInsets(webView, it) }
     root.post {
       ViewCompat.getRootWindowInsets(root)?.let { applyInsets(webView, it) }
     }
+  }
+
+  /**
+   * 论坛等外部站点交给系统浏览器打开：站内 WebView 不共享其域名的登录态，
+   * 且外部页面没有适配状态栏，直接加载会被系统栏遮挡。
+   */
+  private fun installExternalLinks(webView: WebView) {
+    webView.addJavascriptInterface(
+      object {
+        @JavascriptInterface
+        fun open(url: String) {
+          val uri = Uri.parse(url)
+          if (uri.scheme != "http" && uri.scheme != "https") return
+          runOnUiThread {
+            try {
+              startActivity(Intent(Intent.ACTION_VIEW, uri))
+            } catch (error: Throwable) {
+              Log.w("NoveliaLinks", "open external failed", error)
+            }
+          }
+        }
+      },
+      "NoveliaBridge",
+    )
+
+    val script = """
+      (() => {
+        if (window.__noveliaExternalLinks) return;
+        window.__noveliaExternalLinks = true;
+        const isExternal = (href) => {
+          try {
+            const url = new URL(href, location.href);
+            if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+            if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return false;
+            if (url.hostname === 'tauri.localhost') return false;
+            return url.host !== location.host;
+          } catch (error) {
+            return false;
+          }
+        };
+        const open = (href) => {
+          try { NoveliaBridge.open(String(href)); } catch (error) {}
+        };
+        document.addEventListener('click', (event) => {
+          const anchor = event.target && event.target.closest
+            ? event.target.closest('a[href]')
+            : null;
+          if (!anchor || anchor.hasAttribute('download')) return;
+          if (!isExternal(anchor.href)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          open(anchor.href);
+        }, true);
+        const nativeOpen = window.open;
+        window.open = function (url, ...rest) {
+          if (url && isExternal(String(url))) {
+            open(url);
+            return null;
+          }
+          return nativeOpen ? nativeOpen.call(window, url, ...rest) : null;
+        };
+      })();
+    """.trimIndent()
+
+    if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+      try {
+        WebViewCompat.addDocumentStartJavaScript(webView, script, setOf("*"))
+      } catch (error: Throwable) {
+        Log.w("NoveliaLinks", "addDocumentStartJavaScript failed", error)
+      }
+    }
+    webView.evaluateJavascript(script, null)
   }
 
   private fun watchWindowInsets() {
