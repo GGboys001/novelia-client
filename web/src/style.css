@@ -6,7 +6,18 @@
  * 0px，导致移动端顶部导航整条高度为 0。这里在布局容器上直接提供相同高度。
  */
 .web-kit-layout {
-  --web-kit-header-height: 50px;
+  --web-kit-header-height: calc(50px + var(--novelia-inset-top, 0px));
+  padding-bottom: var(--novelia-inset-bottom, 0px);
+}
+
+/* Android 端由原生桥接写入系统栏高度，避免顶部导航被状态栏遮挡。 */
+:root {
+  --novelia-inset-top: 0px;
+  --novelia-inset-bottom: 0px;
+}
+
+.web-kit-layout > div > header {
+  padding-top: var(--novelia-inset-top, 0px);
 }
 
 /*
