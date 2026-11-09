@@ -8,8 +8,8 @@
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
-| Windows x64 | `Novelia-Setup-0.1.1-x64.exe` | 安装到 `%LOCALAPPDATA%\Programs\Novelia`，自动创建桌面与开始菜单快捷方式，可在「应用和功能」中卸载 |
-| Android arm64 | `Novelia-0.1.1-arm64.apk` | 直接覆盖安装，应用包名为 `cc.novelia.client.debug` |
+| Windows x64 | `Novelia-Setup-0.1.2-x64.exe` | 安装到 `%LOCALAPPDATA%\Programs\Novelia`，自动创建桌面与开始菜单快捷方式，可在「应用和功能」中卸载 |
+| Android arm64 | `Novelia-0.1.2-arm64.apk` | 直接覆盖安装，应用包名为 `cc.novelia.client.debug` |
 
 Windows 端依赖系统自带的 WebView2 运行时（Windows 11 与较新的 Windows 10 默认已安装）。Android 端当前为 arm64 调试签名包，未适配 armeabi-v7a 与 x86。
 
@@ -22,6 +22,7 @@ Windows 端依赖系统自带的 WebView2 运行时（Windows 11 与较新的 Wi
 - 网络模式支持 ECH 直连、系统代理、直连和手动 HTTP/SOCKS5 代理
 - 支持 Windows 安装包与 Android arm64 APK
 - Android 端适配 edge-to-edge：由原生层把状态栏与手势条高度写入 CSS 变量，顶部导航不会被系统栏遮挡
+- 论坛在应用内打开：跳转时带上登录态，并按同一套安全区规则避让状态栏（其它外站仍走系统浏览器）
 
 ## 源码结构
 
