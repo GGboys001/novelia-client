@@ -17,6 +17,9 @@ import androidx.webkit.WebViewFeature
 import mobile.Mobile
 
 class MainActivity : TauriActivity() {
+  // 论坛等外部页面在应用内打开，需要系统返回键能退回 WebView 历史。
+  override val handleBackNavigation: Boolean = true
+
   private var webView: WebView? = null
   private var insetScript: ScriptHandler? = null
   private var lastTop = -1f
@@ -42,6 +45,7 @@ class MainActivity : TauriActivity() {
     Log.i("NoveliaInsets", "onWebViewCreate")
     this.webView = webView
     installExternalLinks(webView)
+    installForumBridge(webView)
     val root = window.decorView
     ViewCompat.getRootWindowInsets(root)?.let { applyInsets(webView, it) }
     root.post {
@@ -50,8 +54,8 @@ class MainActivity : TauriActivity() {
   }
 
   /**
-   * 论坛等外部站点交给系统浏览器打开：站内 WebView 不共享其域名的登录态，
-   * 且外部页面没有适配状态栏，直接加载会被系统栏遮挡。
+   * 其它外部站点（GitHub、Telegram 等）交给系统浏览器打开，避免在 WebView 内
+   * 没有返回入口；novelia.cc 的子站保留在应用内，由 installForumBridge 处理。
    */
   private fun installExternalLinks(webView: WebView) {
     webView.addJavascriptInterface(
@@ -82,6 +86,8 @@ class MainActivity : TauriActivity() {
             if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
             if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return false;
             if (url.hostname === 'tauri.localhost') return false;
+            // 站内站点（论坛等）继续在应用内打开，交给论坛桥接处理登录态与安全区。
+            if (url.hostname === 'novelia.cc' || url.hostname.endsWith('.novelia.cc')) return false;
             return url.host !== location.host;
           } catch (error) {
             return false;
@@ -116,6 +122,69 @@ class MainActivity : TauriActivity() {
         WebViewCompat.addDocumentStartJavaScript(webView, script, setOf("*"))
       } catch (error: Throwable) {
         Log.w("NoveliaLinks", "addDocumentStartJavaScript failed", error)
+      }
+    }
+    webView.evaluateJavascript(script, null)
+  }
+
+  /**
+   * 论坛是独立域名，登录态存在 web-kit 的 localStorage 里，页面本身也没有适配
+   * 状态栏。跳转前把登录态放进 URL hash，论坛页加载时写回 localStorage，并补上
+   * 与主站一致的顶部安全区样式。
+   */
+  private fun installForumBridge(webView: WebView) {
+    val script = """
+      (() => {
+        if (window.__noveliaForumBridge) return;
+        window.__noveliaForumBridge = true;
+        const SESSION_KEY = 'web-kit:session:v1';
+        const FORUM_HOST = 'forum.novelia.cc';
+
+        if (location.hostname === FORUM_HOST) {
+          try {
+            const match = /novelia-session=([^&]+)/.exec(location.hash);
+            if (match) {
+              localStorage.setItem(SESSION_KEY, decodeURIComponent(match[1]));
+              history.replaceState(null, '', location.pathname + location.search);
+            }
+          } catch (error) {}
+          const css = '.web-kit-layout{--web-kit-header-height:calc(50px + var(--novelia-inset-top, 0px));}'
+            + '.web-kit-layout>div>header{padding-top:var(--novelia-inset-top, 0px);}';
+          const append = () => {
+            if (!document.head) return;
+            const style = document.createElement('style');
+            style.textContent = css;
+            document.head.appendChild(style);
+          };
+          if (document.head) append();
+          else document.addEventListener('DOMContentLoaded', append, { once: true });
+          return;
+        }
+
+        document.addEventListener('click', (event) => {
+          const anchor = event.target && event.target.closest
+            ? event.target.closest('a[href]')
+            : null;
+          if (!anchor) return;
+          let url;
+          try { url = new URL(anchor.href, location.href); } catch (error) { return; }
+          if (url.hostname !== FORUM_HOST) return;
+          let session = null;
+          try { session = localStorage.getItem(SESSION_KEY); } catch (error) {}
+          if (!session) return;
+          url.hash = 'novelia-session=' + encodeURIComponent(session);
+          event.preventDefault();
+          event.stopPropagation();
+          location.href = url.toString();
+        }, true);
+      })();
+    """.trimIndent()
+
+    if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+      try {
+        WebViewCompat.addDocumentStartJavaScript(webView, script, setOf("*"))
+      } catch (error: Throwable) {
+        Log.w("NoveliaLinks", "forum bridge inject failed", error)
       }
     }
     webView.evaluateJavascript(script, null)

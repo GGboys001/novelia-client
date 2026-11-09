@@ -881,6 +881,56 @@ pub fn run() {
                     }});"
                 );
 
+                // 论坛是独立域名，登录态存在 web-kit 的 localStorage 里，且它的页面
+                // 没有做安全区适配。这里在跳转前把登录态放进 URL hash，论坛页加载时
+                // 再写回 localStorage，并补上与主站一致的顶部安全区样式。
+                let forum_bridge = r#"
+(function () {
+  if (window.__noveliaForumBridge) return;
+  window.__noveliaForumBridge = true;
+  var SESSION_KEY = 'web-kit:session:v1';
+  var FORUM_HOST = 'forum.novelia.cc';
+
+  if (location.hostname === FORUM_HOST) {
+    try {
+      var match = /novelia-session=([^&]+)/.exec(location.hash);
+      if (match) {
+        localStorage.setItem(SESSION_KEY, decodeURIComponent(match[1]));
+        history.replaceState(null, '', location.pathname + location.search);
+      }
+    } catch (error) {}
+    var css = '.web-kit-layout{--web-kit-header-height:calc(50px + var(--novelia-inset-top, 0px));}'
+      + '.web-kit-layout>div>header{padding-top:var(--novelia-inset-top, 0px);}';
+    var append = function () {
+      if (!document.head) return;
+      var style = document.createElement('style');
+      style.textContent = css;
+      document.head.appendChild(style);
+    };
+    if (document.head) append();
+    else document.addEventListener('DOMContentLoaded', append, { once: true });
+    return;
+  }
+
+  document.addEventListener('click', function (event) {
+    var anchor = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+    if (!anchor) return;
+    var url;
+    try { url = new URL(anchor.href, location.href); } catch (error) { return; }
+    if (url.hostname !== FORUM_HOST) return;
+    var session = null;
+    try { session = localStorage.getItem(SESSION_KEY); } catch (error) {}
+    if (!session) return;
+    url.hash = 'novelia-session=' + encodeURIComponent(session);
+    event.preventDefault();
+    event.stopPropagation();
+    location.href = url.toString();
+  }, true);
+})();
+"#;
+
+                let init_script = format!("{init_script}{forum_bridge}");
+
                 let builder =
                     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                         .title("Novelia")
