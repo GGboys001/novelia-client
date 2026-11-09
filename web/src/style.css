@@ -2,6 +2,14 @@
 @import '@novelia/web-kit/styles.css';
 
 /*
+ * Android System WebView 可能不支持 :has()，web-kit 的头部高度变量会停留在
+ * 0px，导致移动端顶部导航整条高度为 0。这里在布局容器上直接提供相同高度。
+ */
+.web-kit-layout {
+  --web-kit-header-height: 50px;
+}
+
+/*
  * 剧透遮罩语义色，web-kit 尚未暴露该语义，沿用论坛前端的 @theme +
  * [data-theme='dark'] 写法补充，避免直接拿正文色当遮罩导致暗色下发白。
  */
