@@ -2,6 +2,17 @@
 
 基于 [Tauri 2](https://tauri.app/) + Vue 3 的轻小说机翻机器人（Novelia）跨平台客户端，支持 Windows 桌面端与 Android 手机端。
 
+## 下载
+
+前往 [Releases](https://github.com/GGboys001/novelia-client/releases) 下载安装包：
+
+| 平台 | 文件 | 说明 |
+| --- | --- | --- |
+| Windows x64 | `Novelia-Setup-0.1.0-x64.exe` | 安装到 `%LOCALAPPDATA%\Programs\Novelia`，自动创建桌面与开始菜单快捷方式，可在「应用和功能」中卸载 |
+| Android arm64 | `Novelia-0.1.0-arm64.apk` | 直接覆盖安装，应用包名为 `cc.novelia.client.debug` |
+
+Windows 端依赖系统自带的 WebView2 运行时（Windows 11 与较新的 Windows 10 默认已安装）。Android 端当前为 arm64 调试签名包，未适配 armeabi-v7a 与 x86。
+
 ## 特性
 
 - 复用官方 Web 端的布局、组件和样式，保持与网页版一致的操作体验
@@ -9,7 +20,8 @@
 - 内置本地反向代理，统一处理 API/认证的同源、Cookie 与 CORS
 - 支持账号登录、收藏、阅读历史、搜索、排行榜和双语阅读
 - 网络模式支持 ECH 直连、系统代理、直连和手动 HTTP/SOCKS5 代理
-- 支持 Windows 可执行程序与 Android arm64 APK
+- 支持 Windows 安装包与 Android arm64 APK
+- Android 端适配 edge-to-edge：由原生层把状态栏与手势条高度写入 CSS 变量，顶部导航不会被系统栏遮挡
 
 ## 源码结构
 
@@ -106,4 +118,4 @@ Windows 端 ECH 通过侧车进程实现；Android 端通过 gomobile AAR 在应
 
 本项目为非官方客户端，小说内容与账号服务均由原站提供。前端与公共库来源于 GPL-3.0 的 `auto-novel/auto-novel`，本仓库整体以 GPL-3.0 发布。第三方来源与角色素材说明见 [NOTICE.md](NOTICE.md)。
 
-Android 端当前为 arm64 调试包，正式签名包与 iOS 尚未适配。
+Android 端当前为 arm64 调试签名包，正式签名包与 iOS 尚未适配。
