@@ -1,6 +1,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import { htmlBootstrapPlugin } from '@novelia/web-kit/vite';
 import vue from '@vitejs/plugin-vue';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
 import { ProxyAgent } from 'proxy-agent';
 import Sonda from 'sonda/vite';
@@ -21,6 +22,14 @@ export default defineConfig(({ command, mode }) => {
   const isLocalApi = env.VITE_LOCAL_API === 'true';
   const apiUrl = isLocalApi ? 'http://localhost:5000' : 'https://n.novelia.cc';
   const enableSonda = env.VITE_ENABLE_SONDA === 'true';
+  const appVersion = (
+    JSON.parse(
+      readFileSync(
+        fileURLToPath(new URL('./src-tauri/tauri.conf.json', import.meta.url)),
+        'utf8',
+      ),
+    ) as { version: string }
+  ).version;
   const clientApiBase = isAndroid
     ? 'http://127.0.0.1:43110/api/'
     : '/api/';
@@ -34,6 +43,7 @@ export default defineConfig(({ command, mode }) => {
       __API_BASE__: JSON.stringify(clientApiBase),
       __AUTH_URL__: JSON.stringify(clientAuthBase),
       __ECH_AVAILABLE__: JSON.stringify(isAndroid),
+      __APP_VERSION__: JSON.stringify(appVersion),
       __BUILD_TIME__: JSON.stringify(
         env.VITE_BUILD_TIME || new Date().toISOString(),
       ),

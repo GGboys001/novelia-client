@@ -2,6 +2,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { Toast, useWebKit, XPage, XPageHeader } from '@novelia/web-kit';
 import SoundAllTaskCompleted from '@/sound/all_task_completed.mp3';
+import { forumUrl, siteUrls } from '@/config';
 import { noveliaRuntime } from '@/runtime';
 import {
   Setting,
@@ -24,6 +25,7 @@ const { setting } = storeToRefs(settingStore);
 const isClient =
   noveliaRuntime !== undefined ||
   '__TAURI_INTERNALS__' in (globalThis as Record<string, unknown>);
+const appVersion = __APP_VERSION__;
 const echAvailable = noveliaRuntime?.echAvailable ?? __ECH_AVAILABLE__;
 const networkMode = ref<NetworkMode>('system');
 const proxyUrl = ref('');
@@ -291,6 +293,23 @@ const { theme } = useWebKit();
           <n-checkbox v-model:checked="setting.searchLocaleAware">
             支持繁体搜索（不稳定）
           </n-checkbox>
+        </n-flex>
+      </n-list-item>
+
+      <n-list-item>
+        <n-flex vertical>
+          <b>关于</b>
+          <span class="text-xs opacity-60">
+            Novelia 客户端 v{{ appVersion }} · 非官方客户端
+          </span>
+          <span class="text-xs opacity-60">
+            小说内容与账号服务均由原站提供；前端与公共库来自
+            auto-novel/auto-novel，整体以 GPL-3.0 发布。
+          </span>
+          <n-flex size="small" align="center">
+            <n-a :href="siteUrls.repository" target="_blank">GitHub 仓库</n-a>
+            <n-a :href="forumUrl" target="_blank">论坛</n-a>
+          </n-flex>
         </n-flex>
       </n-list-item>
     </n-list>
