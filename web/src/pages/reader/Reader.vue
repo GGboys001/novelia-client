@@ -18,7 +18,9 @@ import { useReaderStore } from './ReaderStore';
 import ReaderLayoutDesktop from './components/ReaderLayoutDesktop.vue';
 import ReaderLayoutMobile from './components/ReaderLayoutMobile.vue';
 import ReaderSkeleton from './components/ReaderSkeleton.vue';
+import { usePullToRefresh } from './components/usePullToRefresh';
 import { useScrollDetector } from './components/useScrollDetector';
+import { RefreshOutlined } from '@vicons/material';
 
 const [DefineChapterLink, ReuseChapterLink] = createReusableTemplate<{
   label: string;
@@ -280,6 +282,16 @@ onKeyDown(['1', '2', '3'], (e) => {
 const showSettingModal = ref(false);
 const showCatalogModal = ref(false);
 
+// 整页重载可重置滚动翻页的累积状态，和浏览器下拉刷新一致。
+const refreshReader = () => {
+  window.location.reload();
+};
+const {
+  distance: pullDistance,
+  refreshing: pullRefreshing,
+  threshold: pullThreshold,
+} = usePullToRefresh(refreshReader);
+
 onKeyDown(['Enter'], (e) => {
   if (showSettingModal.value) {
     return;
@@ -304,6 +316,30 @@ onKeyDown(['Enter'], (e) => {
       "
     />
   </DefineChapterLink>
+
+  <div
+    class="pull-refresh"
+    :class="{ 'is-active': pullDistance > 0 || pullRefreshing }"
+    :style="{
+      transform: `translate(-50%, ${Math.min(pullDistance, 96)}px)`,
+    }"
+    aria-hidden="true"
+  >
+    <n-icon
+      :component="RefreshOutlined"
+      :size="16"
+      :class="{ 'is-spinning': pullRefreshing }"
+    />
+    <span>
+      {{
+        pullRefreshing
+          ? '刷新中…'
+          : pullDistance >= pullThreshold
+            ? '松开刷新'
+            : '下拉刷新'
+      }}
+    </span>
+  </div>
 
   <div class="content">
     <template v-if="!chapterResult">
@@ -381,6 +417,39 @@ onKeyDown(['Enter'], (e) => {
 </template>
 
 <style scoped>
+.pull-refresh {
+  position: fixed;
+  top: calc(var(--novelia-inset-top, 0px) + 10px);
+  left: 50%;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-muted);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.pull-refresh.is-active {
+  opacity: 1;
+}
+
+.pull-refresh .is-spinning {
+  animation: pull-refresh-spin 0.8s linear infinite;
+}
+
+@keyframes pull-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .content {
   max-width: v-bind('`${readerSetting.pageWidth}px`');
   margin: 0 auto;

@@ -5,6 +5,7 @@ import {
   ArrowForwardIosOutlined,
   FormatListBulletedOutlined,
   LibraryBooksOutlined,
+  RefreshOutlined,
   TuneOutlined,
 } from '@vicons/material';
 
@@ -33,6 +34,12 @@ const openCatalogModal = () => {
 const openSettingModal = () => {
   showMenu.value = false;
   emit('requireSettingModal');
+};
+
+// 整页重载，等价于浏览器刷新，可重置滚动翻页的累积状态。
+const refreshReader = () => {
+  showMenu.value = false;
+  window.location.reload();
 };
 
 const readerSettingStore = useReaderSettingStore();
@@ -86,6 +93,7 @@ const onGlobalClick = (event: MouseEvent) => {
     @open-auto-focus.prevent
   >
     <n-flex
+      vertical
       :size="0"
       style="
         width: 100%;
@@ -94,52 +102,66 @@ const onGlobalClick = (event: MouseEvent) => {
         padding-bottom: env(safe-area-inset-bottom);
       "
     >
-      <div style="flex: 1 1 0px">
-        <side-button
-          quaternary
-          :disabled="!chapter.prevId"
-          text="上一章"
-          :icon="ArrowBackIosOutlined"
-          @click="emit('nav', chapter.prevId!)"
-          style="width: 100%"
-        />
-      </div>
-      <router-link v-if="novelUrl" :to="novelUrl" style="flex: 1">
-        <side-button
-          quaternary
-          text="详情"
-          :icon="LibraryBooksOutlined"
-          style="width: 100%"
-        />
-      </router-link>
-      <div style="flex: 1 1 0px">
-        <side-button
-          quaternary
-          text="目录"
-          :icon="FormatListBulletedOutlined"
-          @click="openCatalogModal"
-          style="width: 100%"
-        />
-      </div>
-      <div style="flex: 1 1 0px">
-        <side-button
-          quaternary
-          text="设置"
-          :icon="TuneOutlined"
-          @click="openSettingModal"
-          style="width: 100%"
-        />
-      </div>
-      <div style="flex: 1 1 0px">
-        <side-button
-          quaternary
-          :disabled="!chapter.nextId"
-          text="下一章"
-          :icon="ArrowForwardIosOutlined"
-          @click="emit('nav', chapter.nextId!)"
-          style="width: 100%"
-        />
-      </div>
+      <n-flex :size="0" style="width: 100%">
+        <router-link v-if="novelUrl" :to="novelUrl" style="flex: 1 1 0">
+          <side-button
+            quaternary
+            text="详情"
+            :icon="LibraryBooksOutlined"
+            style="width: 100%"
+          />
+        </router-link>
+        <div style="flex: 1 1 0px">
+          <side-button
+            quaternary
+            text="目录"
+            :icon="FormatListBulletedOutlined"
+            @click="openCatalogModal"
+            style="width: 100%"
+          />
+        </div>
+        <div style="flex: 1 1 0px">
+          <side-button
+            quaternary
+            text="刷新"
+            :icon="RefreshOutlined"
+            @click="refreshReader"
+            style="width: 100%"
+          />
+        </div>
+        <div style="flex: 1 1 0px">
+          <side-button
+            quaternary
+            text="设置"
+            :icon="TuneOutlined"
+            @click="openSettingModal"
+            style="width: 100%"
+          />
+        </div>
+      </n-flex>
+
+      <n-flex :size="0" style="width: 100%">
+        <div style="flex: 1 1 0px">
+          <side-button
+            quaternary
+            :disabled="!chapter.prevId"
+            text="上一章"
+            :icon="ArrowBackIosOutlined"
+            @click="emit('nav', chapter.prevId!)"
+            style="width: 100%"
+          />
+        </div>
+        <div style="flex: 1 1 0px">
+          <side-button
+            quaternary
+            :disabled="!chapter.nextId"
+            text="下一章"
+            :icon="ArrowForwardIosOutlined"
+            @click="emit('nav', chapter.nextId!)"
+            style="width: 100%"
+          />
+        </div>
+      </n-flex>
     </n-flex>
   </XDrawer>
 </template>
