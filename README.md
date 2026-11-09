@@ -8,8 +8,8 @@
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
-| Windows x64 | `Novelia-Setup-0.1.0-x64.exe` | 安装到 `%LOCALAPPDATA%\Programs\Novelia`，自动创建桌面与开始菜单快捷方式，可在「应用和功能」中卸载 |
-| Android arm64 | `Novelia-0.1.0-arm64.apk` | 直接覆盖安装，应用包名为 `cc.novelia.client.debug` |
+| Windows x64 | `Novelia-Setup-0.1.1-x64.exe` | 安装到 `%LOCALAPPDATA%\Programs\Novelia`，自动创建桌面与开始菜单快捷方式，可在「应用和功能」中卸载 |
+| Android arm64 | `Novelia-0.1.1-arm64.apk` | 直接覆盖安装，应用包名为 `cc.novelia.client.debug` |
 
 Windows 端依赖系统自带的 WebView2 运行时（Windows 11 与较新的 Windows 10 默认已安装）。Android 端当前为 arm64 调试签名包，未适配 armeabi-v7a 与 x86。
 
