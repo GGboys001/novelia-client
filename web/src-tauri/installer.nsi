@@ -6,15 +6,18 @@ ManifestDPIAware true
 ; https://github.com/tauri-apps/tauri/pull/10106
 ManifestDPIAwareness PerMonitorV2
 
-!if "lzma" == "none"
+!if "{{compression}}" == "none"
   SetCompress off
 !else
   ; Set the compression algorithm. We default to LZMA.
-  SetCompressor /SOLID "lzma"
+  SetCompressor /SOLID "{{compression}}"
 !endif
 
 ; Keep above !include to stay ahead of any plugin command
 ; see https://github.com/tauri-apps/tauri/pull/15422#discussion_r3289239624
+{{#if signed_plugins_path}}
+!addplugindir "{{signed_plugins_path}}"
+{{/if}}
 
 !include MUI2.nsh
 !include FileFunc.nsh
@@ -29,41 +32,44 @@ ManifestDPIAwareness PerMonitorV2
 ${StrCase}
 ${StrLoc}
 
+{{#if installer_hooks}}
+!include "{{installer_hooks}}"
+{{/if}}
 
 !define WEBVIEW2APPGUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 
-!define MANUFACTURER "Novelia Client"
-!define PRODUCTNAME "Novelia 轻小说机翻机器人"
-!define VERSION "0.1.5"
-!define VERSIONWITHBUILD "0.1.5.0"
-!define HOMEPAGE ""
-!define INSTALLMODE "currentUser"
-!define LICENSE "E:\Mycode\轻小说机翻源码\auto-novel\web\src-tauri\target\release\nsis\x64\license_file"
-!define INSTALLERICON "E:\Mycode\轻小说机翻源码\auto-novel\web\src-tauri\icons\icon.ico"
-!define SIDEBARIMAGE ""
-!define HEADERIMAGE ""
-!define UNINSTALLERICON ""
-!define UNINSTALLERHEADERIMAGE ""
-!define MAINBINARYNAME "Novelia"
-!define MAINBINARYSRCPATH "E:\Mycode\轻小说机翻源码\auto-novel\web\src-tauri\target\release\Novelia.exe"
-!define BUNDLEID "cc.novelia.client"
-!define COPYRIGHT "GPL-3.0"
-!define OUTFILE "nsis-output.exe"
-!define ARCH "x64"
-!define ADDITIONALPLUGINSPATH "C:\Users\26040\AppData\Local\tauri\NSIS\Plugins\x86-unicode\additional"
-!define ALLOWDOWNGRADES "true"
-!define DISPLAYLANGUAGESELECTOR "false"
-!define INSTALLWEBVIEW2MODE "downloadBootstrapper"
-!define WEBVIEW2INSTALLERARGS "/silent"
-!define WEBVIEW2BOOTSTRAPPERPATH ""
-!define WEBVIEW2INSTALLERPATH ""
-!define MINIMUMWEBVIEW2VERSION ""
-!define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}"
+!define MANUFACTURER "{{manufacturer}}"
+!define PRODUCTNAME "{{product_name}}"
+!define VERSION "{{version}}"
+!define VERSIONWITHBUILD "{{version_with_build}}"
+!define HOMEPAGE "{{homepage}}"
+!define INSTALLMODE "{{install_mode}}"
+!define LICENSE "{{license}}"
+!define INSTALLERICON "{{installer_icon}}"
+!define SIDEBARIMAGE "{{sidebar_image}}"
+!define HEADERIMAGE "{{header_image}}"
+!define UNINSTALLERICON "{{uninstaller_icon}}"
+!define UNINSTALLERHEADERIMAGE "{{uninstaller_header_image}}"
+!define MAINBINARYNAME "{{main_binary_name}}"
+!define MAINBINARYSRCPATH "{{main_binary_path}}"
+!define BUNDLEID "{{bundle_id}}"
+!define COPYRIGHT "{{copyright}}"
+!define OUTFILE "{{out_file}}"
+!define ARCH "{{arch}}"
+!define ADDITIONALPLUGINSPATH "{{additional_plugins_path}}"
+!define ALLOWDOWNGRADES "{{allow_downgrades}}"
+!define DISPLAYLANGUAGESELECTOR "{{display_language_selector}}"
+!define INSTALLWEBVIEW2MODE "{{install_webview2_mode}}"
+!define WEBVIEW2INSTALLERARGS "{{webview2_installer_args}}"
+!define WEBVIEW2BOOTSTRAPPERPATH "{{webview2_bootstrapper_path}}"
+!define WEBVIEW2INSTALLERPATH "{{webview2_installer_path}}"
+!define MINIMUMWEBVIEW2VERSION "{{minimum_webview2_version}}"
+!define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${MAINBINARYNAME}"
 !define MANUKEY "Software\${MANUFACTURER}"
-!define MANUPRODUCTKEY "${MANUKEY}\${PRODUCTNAME}"
-!define UNINSTALLERSIGNCOMMAND ""
-!define ESTIMATEDSIZE "23012"
-!define STARTMENUFOLDER ""
+!define MANUPRODUCTKEY "${MANUKEY}\${MAINBINARYNAME}"
+!define UNINSTALLERSIGNCOMMAND "{{uninstaller_sign_cmd}}"
+!define ESTIMATEDSIZE "{{estimated_size}}"
+!define STARTMENUFOLDER "{{start_menu_folder}}"
 
 Var PassiveMode
 Var UpdateMode
@@ -78,7 +84,7 @@ OutFile "${OUTFILE}"
 ; We don't actually use this value as default install path,
 ; it's just for nsis to append the product name folder in the directory selector
 ; https://nsis.sourceforge.io/Reference/InstallDir
-!define PLACEHOLDER_INSTALL_DIR "placeholder\${PRODUCTNAME}"
+!define PLACEHOLDER_INSTALL_DIR "placeholder\${MAINBINARYNAME}"
 InstallDir "${PLACEHOLDER_INSTALL_DIR}"
 
 VIProductVersion "${VERSIONWITHBUILD}"
@@ -108,7 +114,7 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 
 !if "${INSTALLMODE}" == "both"
   !define MULTIUSER_MUI
-  !define MULTIUSER_INSTALLMODE_INSTDIR "${PRODUCTNAME}"
+  !define MULTIUSER_INSTALLMODE_INSTDIR "${MAINBINARYNAME}"
   !define MULTIUSER_INSTALLMODE_COMMANDLINE
   !if "${ARCH}" == "x64"
     !define MULTIUSER_USE_PROGRAMFILES64
@@ -493,10 +499,14 @@ FunctionEnd
 ; file that only defines the old spelling overrides the default and the fallback shows its
 ; text. `0` as the language id means the language inserted right above.
 ; TODO: remove the `choowHowToInstall` fallback in a future major version
-!insertmacro MUI_LANGUAGE "SimpChinese"
+{{#each languages}}
+!insertmacro MUI_LANGUAGE "{{this}}"
 LangString choowHowToInstall 0 ""
+{{/each}}
 !insertmacro MUI_RESERVEFILE_LANGDLL
-  !include "E:\Mycode\轻小说机翻源码\auto-novel\web\src-tauri\target\release\nsis\x64\SimpChinese.nsh"
+{{#each language_files}}
+  !include "{{this}}"
+{{/each}}
 
 Function .onInit
   ${GetOptions} $CMDLINE "/P" $PassiveMode
@@ -525,17 +535,17 @@ Function .onInit
     !if "${INSTALLMODE}" == "perMachine"
       ${If} ${RunningX64}
         !if "${ARCH}" == "x64"
-          StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCTNAME}"
+          StrCpy $INSTDIR "$PROGRAMFILES64\${MAINBINARYNAME}"
         !else if "${ARCH}" == "arm64"
-          StrCpy $INSTDIR "$PROGRAMFILES64\${PRODUCTNAME}"
+          StrCpy $INSTDIR "$PROGRAMFILES64\${MAINBINARYNAME}"
         !else
-          StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCTNAME}"
+          StrCpy $INSTDIR "$PROGRAMFILES\${MAINBINARYNAME}"
         !endif
       ${Else}
-        StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCTNAME}"
+        StrCpy $INSTDIR "$PROGRAMFILES\${MAINBINARYNAME}"
       ${EndIf}
     !else if "${INSTALLMODE}" == "currentUser"
-      StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"
+      StrCpy $INSTDIR "$LOCALAPPDATA\${MAINBINARYNAME}"
     !endif
 
     Call RestorePreviousInstallLocation
@@ -684,16 +694,32 @@ Section Install
   File "${MAINBINARYSRCPATH}"
 
   ; Copy resources
-    CreateDirectory "$INSTDIR\"
-    File /a "/oname=LICENSE" "E:\Mycode\轻小说机翻源码\auto-novel\web\src-tauri\..\..\LICENSE"
-    File /a "/oname=novelia-q.ico" "E:\Mycode\轻小说机翻源码\auto-novel\web\src-tauri\icons\icon.ico"
+  {{#each resources_dirs}}
+    CreateDirectory "$INSTDIR\\{{this}}"
+  {{/each}}
+  {{#each resources}}
+    File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
+  {{/each}}
 
   ; Copy external binaries
-    File /a "/oname=ech-proxy.exe" "E:\Mycode\轻小说机翻源码\auto-novel\web\src-tauri\binaries\ech-proxy-x86_64-pc-windows-msvc.exe"
+  {{#each binaries}}
+    File /a "/oname={{this}}" "{{no-escape @key}}"
+  {{/each}}
 
   ; Create file associations
+  {{#each file_associations as |association| ~}}
+    {{#each association.ext as |ext| ~}}
+       !insertmacro APP_ASSOCIATE "{{ext}}" "{{or association.name ext}}" "{{association-description association.description ext}}" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\",0" "Open with ${PRODUCTNAME}" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
+    {{/each}}
+  {{/each}}
 
   ; Register deep links
+  {{#each deep_link_protocols as |protocol| ~}}
+    WriteRegStr SHCTX "Software\Classes\\{{protocol}}" "URL Protocol" ""
+    WriteRegStr SHCTX "Software\Classes\\{{protocol}}" "" "URL:${BUNDLEID} protocol"
+    WriteRegStr SHCTX "Software\Classes\\{{protocol}}\DefaultIcon" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\",0"
+    WriteRegStr SHCTX "Software\Classes\\{{protocol}}\shell\open\command" "" "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
+  {{/each}}
 
   ; Create uninstaller
   WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -806,20 +832,37 @@ Section Uninstall
   Delete "$INSTDIR\${MAINBINARYNAME}.exe"
 
   ; Delete resources
-    Delete "$INSTDIR\LICENSE"
-    Delete "$INSTDIR\novelia-q.ico"
+  {{#each resources}}
+    Delete "$INSTDIR\\{{this.[1]}}"
+  {{/each}}
 
   ; Delete external binaries
-    Delete "$INSTDIR\ech-proxy.exe"
+  {{#each binaries}}
+    Delete "$INSTDIR\\{{this}}"
+  {{/each}}
 
   ; Delete app associations
+  {{#each file_associations as |association| ~}}
+    {{#each association.ext as |ext| ~}}
+      !insertmacro APP_UNASSOCIATE "{{ext}}" "{{or association.name ext}}"
+    {{/each}}
+  {{/each}}
 
   ; Delete deep links
+  {{#each deep_link_protocols as |protocol| ~}}
+    ReadRegStr $R7 SHCTX "Software\Classes\\{{protocol}}\shell\open\command" ""
+    ${If} $R7 == "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
+      DeleteRegKey SHCTX "Software\Classes\\{{protocol}}"
+    ${EndIf}
+  {{/each}}
 
 
   ; Delete uninstaller
   Delete "$INSTDIR\uninstall.exe"
 
+  {{#each resources_ancestors}}
+  RMDir /REBOOTOK "$INSTDIR\\{{this}}"
+  {{/each}}
   RMDir "$INSTDIR"
 
   ; Remove shortcuts if not updating
