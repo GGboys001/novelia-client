@@ -290,7 +290,11 @@ const {
   distance: pullDistance,
   refreshing: pullRefreshing,
   threshold: pullThreshold,
-} = usePullToRefresh(refreshReader);
+} = usePullToRefresh(refreshReader, {
+  // 目录、设置弹窗打开时页面被锁定滚动，此时的下拉是在翻看列表内容，
+  // 不能触发整页刷新。
+  enabled: () => !showCatalogModal.value && !showSettingModal.value,
+});
 
 onKeyDown(['Enter'], (e) => {
   if (showSettingModal.value) {

@@ -56,14 +56,18 @@ cd web
 pnpm tauri build --no-bundle
 ```
 
-ECH 侧车需要 Go 1.27.1：
+ECH 侧车需要 Go 1.27.1。`web/src-tauri/binaries/` 被 gitignore 排除，克隆后是空的，
+而 `tauri.conf.json` 的 `bundle.externalBin` 依赖该目录，请先运行构建脚本：
 
-```bash
-cd web/src-tauri/ech
-go build -trimpath -ldflags "-s -w" -o ../binaries/ech-proxy.exe ./cmd/novelia-ech-proxy
+```powershell
+pwsh ./scripts/build-ech-sidecar.ps1
 ```
 
-正式运行时 `ech-proxy.exe` 必须和 `Novelia.exe` 放在同一目录。
+脚本会生成 `ech-proxy.exe` 和 `ech-proxy-x86_64-pc-windows-msvc.exe`（后者是
+`externalBin` 要求的命名）。正式运行时 `ech-proxy.exe` 必须和 `Novelia.exe`
+放在同一目录；`tauri build` 打包 NSIS 安装包时会自动把侧车一起装进去。
+
+缺少侧车时，默认的 ECH 模式会因为找不到 `ech-proxy.exe` 而让所有 API 请求返回 502。
 
 ## 构建 Android 端
 

@@ -10,13 +10,24 @@ import (
 	"time"
 )
 
-// Only restart bodyless reads, and only before GotConn: at that point no HTTP
-// request bytes have been sent. Never replay uploads, HTTP errors or body reads.
-// The core uses DialTLSContext, so Transport.TLSHandshakeTimeout is ignored.
+// Only restart requests that have not written any HTTP bytes yet, and only
+// before GotConn: at that point no request bytes have been sent, so replaying is
+// safe even for non-idempotent methods. Never replay uploads, HTTP errors or body
+// reads. The core uses DialTLSContext, so Transport.TLSHandshakeTimeout is ignored.
+//
+// GET/HEAD are additionally retried on a stale pooled connection, because
+// net/http transparently retries those when it detects one; POST cannot rely on
+// that, and a single stalled ECH handshake would otherwise surface as a timeout.
 func doWithConnectRetry(do func(*http.Request) (*http.Response, error), request *http.Request, budget time.Duration, limit ...int) (*http.Response, error) {
+	bodyless := request.Body == nil
+	idempotent := bodyless && (request.Method == http.MethodGet || request.Method == http.MethodHead)
+	// Non-idempotent requests get a second chance only while still unconnected,
+	// which the GotConn check below guarantees.
 	attempts := 1
-	if request.Body == nil && (request.Method == http.MethodGet || request.Method == http.MethodHead) {
+	if idempotent {
 		attempts = 3
+	} else if request.Method != http.MethodHead {
+		attempts = 2
 	}
 	if len(limit) > 0 && limit[0] > 0 && limit[0] < attempts {
 		attempts = limit[0]
