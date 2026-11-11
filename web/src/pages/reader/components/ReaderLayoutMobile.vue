@@ -2,6 +2,7 @@
 import { XDrawer } from '@novelia/web-kit';
 import {
   ArrowBackIosOutlined,
+  ArrowBackOutlined,
   ArrowForwardIosOutlined,
   FormatListBulletedOutlined,
   LibraryBooksOutlined,
@@ -24,6 +25,13 @@ const emit = defineEmits<{
 }>();
 
 const showMenu = ref(false);
+
+const router = useRouter();
+
+// 本地小说没有详情页，返回按钮直接退出阅读回到本地书架。
+const exitReader = () => {
+  router.push('/favorite/local');
+};
 
 // 先关闭抽屉，避免其模态交互和滚动锁影响外部弹窗。
 const openCatalogModal = () => {
@@ -111,6 +119,15 @@ const onGlobalClick = (event: MouseEvent) => {
             style="width: 100%"
           />
         </router-link>
+        <div v-else style="flex: 1 1 0px">
+          <side-button
+            quaternary
+            text="返回"
+            :icon="ArrowBackOutlined"
+            @click="exitReader"
+            style="width: 100%"
+          />
+        </div>
         <div style="flex: 1 1 0px">
           <side-button
             quaternary
@@ -140,7 +157,7 @@ const onGlobalClick = (event: MouseEvent) => {
         </div>
       </n-flex>
 
-      <n-flex :size="0" style="width: 100%">
+      <n-flex v-if="novelUrl" :size="0" style="width: 100%">
         <div style="flex: 1 1 0px">
           <side-button
             quaternary

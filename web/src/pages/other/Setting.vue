@@ -19,6 +19,15 @@ interface NetworkConfig {
   proxy: string;
 }
 
+interface DownloadSettings {
+  /** 用户自定义目录，空表示使用默认目录。 */
+  dir: string;
+  /** 平台默认下载目录。 */
+  default_dir: string;
+  /** 实际生效的下载目录。 */
+  resolved_dir: string;
+}
+
 const settingStore = useSettingStore();
 const { setting } = storeToRefs(settingStore);
 
@@ -84,7 +93,48 @@ const testNetwork = async () => {
   }
 };
 
-onMounted(loadNetworkConfig);
+const downloadSettings = ref<DownloadSettings>();
+const downloadDir = ref('');
+const downloadMessage = ref('');
+const savingDownload = ref(false);
+
+const loadDownloadSettings = async () => {
+  if (!isClient) return;
+  try {
+    const settings = await invoke<DownloadSettings>('get_download_settings');
+    downloadSettings.value = settings;
+    downloadDir.value = settings.dir;
+  } catch (error) {
+    downloadMessage.value = `读取下载设置失败：${error}`;
+  }
+};
+
+const saveDownloadSettings = async () => {
+  savingDownload.value = true;
+  downloadMessage.value = '';
+  try {
+    const settings = await invoke<DownloadSettings>('set_download_settings', {
+      config: { dir: downloadDir.value },
+    });
+    downloadSettings.value = settings;
+    downloadDir.value = settings.dir;
+    downloadMessage.value = '已保存，新的下载会保存到该目录';
+  } catch (error) {
+    downloadMessage.value = `保存失败：${error}`;
+  } finally {
+    savingDownload.value = false;
+  }
+};
+
+const resetDownloadSettings = async () => {
+  downloadDir.value = '';
+  await saveDownloadSettings();
+};
+
+onMounted(() => {
+  void loadNetworkConfig();
+  void loadDownloadSettings();
+});
 
 const clearWebSearchHistory = () => {
   useWebSearchHistoryStore().clear();
@@ -146,14 +196,72 @@ const { theme } = useWebKit();
             style="max-width: 420px"
           />
           <n-flex align="center">
-            <n-button size="small" :loading="savingNetwork" @click="saveNetworkConfig">
+            <n-button
+              size="small"
+              :loading="savingNetwork"
+              @click="saveNetworkConfig"
+            >
               保存
             </n-button>
-            <n-button size="small" :loading="testingNetwork" @click="testNetwork">
+            <n-button
+              size="small"
+              :loading="testingNetwork"
+              @click="testNetwork"
+            >
               测试连接
             </n-button>
           </n-flex>
-          <span v-if="networkMessage" class="text-xs">{{ networkMessage }}</span>
+          <span v-if="networkMessage" class="text-xs">
+            {{ networkMessage }}
+          </span>
+        </n-flex>
+      </n-list-item>
+
+      <n-list-item v-if="isClient">
+        <n-flex vertical>
+          <b>下载目录</b>
+          <span class="text-xs opacity-60">
+            下载的 EPUB / TXT 会保存到该目录，留空使用默认目录；EPUB
+            下载完成后仍会自动加入本地小说。
+          </span>
+          <n-input
+            v-model:value="downloadDir"
+            size="small"
+            placeholder="留空使用默认目录，例如 D:/Novelia"
+            style="max-width: 520px"
+          />
+          <span v-if="downloadSettings" class="text-xs opacity-60 break-all">
+            当前目录：{{ downloadSettings.resolved_dir }}
+          </span>
+          <span
+            v-if="downloadSettings?.dir"
+            class="text-xs opacity-60 break-all"
+          >
+            默认目录：{{ downloadSettings.default_dir }}
+          </span>
+          <n-flex align="center">
+            <n-button
+              size="small"
+              :loading="savingDownload"
+              @click="saveDownloadSettings"
+            >
+              保存
+            </n-button>
+            <n-button
+              size="small"
+              :disabled="!downloadSettings?.dir"
+              @click="resetDownloadSettings"
+            >
+              恢复默认
+            </n-button>
+          </n-flex>
+          <span class="text-xs opacity-60">
+            需要填写绝对路径；Android
+            上公共下载目录可能不可写，保存失败时请留空使用默认目录。
+          </span>
+          <span v-if="downloadMessage" class="text-xs">
+            {{ downloadMessage }}
+          </span>
         </n-flex>
       </n-list-item>
 

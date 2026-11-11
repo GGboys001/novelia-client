@@ -14,7 +14,7 @@ import {
 import { checkIsMobile } from '@/util';
 import type { Result } from '@/util/result';
 import type { ReaderChapter } from './ReaderStore';
-import { useReaderStore } from './ReaderStore';
+import { LOCAL_FULL_CHAPTER_ID, useReaderStore } from './ReaderStore';
 import ReaderLayoutDesktop from './components/ReaderLayoutDesktop.vue';
 import ReaderLayoutMobile from './components/ReaderLayoutMobile.vue';
 import ReaderSkeleton from './components/ReaderSkeleton.vue';
@@ -37,6 +37,15 @@ const { whoami } = storeToRefs(whoamiStore);
 const readerSettingStore = useReaderSettingStore();
 const { readerSetting } = storeToRefs(readerSettingStore);
 
+// 本地卷名与 EPUB 章节 id（文件内路径）在路由里都是编码过的。
+const decodeUrlPart = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch (error) {
+    return value;
+  }
+};
+
 const gnid = ((): GenericNovelId => {
   const path = route.path;
   const params = route.params;
@@ -45,7 +54,7 @@ const gnid = ((): GenericNovelId => {
     const novelId = params.novelId as string;
     return GenericNovelId.web(providerId, novelId);
   } else {
-    const volumeId = params.novelId as string;
+    const volumeId = decodeUrlPart(params.novelId as string);
     return GenericNovelId.local(volumeId);
   }
 })();
@@ -110,9 +119,9 @@ const updateChapter = (
   currentChapterId.value = chapterId;
 
   if (replace) {
-    router.replace(`${prefix}/${chapterId}`);
+    router.replace(`${prefix}/${encodeURIComponent(chapterId)}`);
   } else {
-    router.push(`${prefix}/${chapterId}`);
+    router.push(`${prefix}/${encodeURIComponent(chapterId)}`);
   }
 };
 
@@ -148,15 +157,47 @@ const navToChapter = async (chapterId: string) => {
 
 const scrollToReadPosition = async () => {
   const readPosition = ReadPositionRepo.getPosition(gnid);
-  if (readPosition && readPosition.chapterId === route.params.chapterId) {
+  if (readPosition && readPosition.chapterId === currentChapterId.value) {
     // hacky: 等待段落显示完成
     await nextTick();
     await nextTick();
+    if (readPosition.paragraphIndex !== undefined) {
+      const chapterEl = Array.from(
+        document.querySelectorAll('[data-chapter]'),
+      ).find((it) => it.getAttribute('data-id') === readPosition.chapterId);
+      const target = chapterEl?.querySelector(
+        `[data-paragraph-index="${readPosition.paragraphIndex}"]`,
+      );
+      if (target) {
+        target.scrollIntoView({ block: 'start' });
+        return;
+      }
+    }
     window.scrollTo({ top: readPosition.scrollY });
   }
 };
 
 watch(chapterResult, scrollToReadPosition, { once: true });
+
+/** 本地小说整篇加载：目录点击后滚动到对应章节开头。 */
+const jumpToLocalChapter = async (chapterId: string) => {
+  const ranges = chapterResult.value?.ok
+    ? chapterResult.value.value.chapterRanges
+    : undefined;
+  const range = ranges?.find((it) => it.chapterId === chapterId);
+  if (!range) return;
+  await nextTick();
+  const chapterEl = document.querySelector('[data-chapter]');
+  if (!chapterEl) return;
+  // 单语模式可能跳过章节开头的段落，取第一条不小于目标下标的元素。
+  const target = Array.from(
+    chapterEl.querySelectorAll('[data-paragraph-index]'),
+  ).find(
+    (it) =>
+      Number(it.getAttribute('data-paragraph-index')) >= range.paragraphIndex,
+  );
+  target?.scrollIntoView({ block: 'start' });
+};
 watch(
   () => readerSetting.value.pageTurnMode,
   async () => {
@@ -168,7 +209,11 @@ watch(
 watch(
   route,
   (route) => {
-    const urlChapterId = route.params.chapterId as string;
+    // 本地小说整篇加载，路由里统一使用虚拟章节 id。
+    const urlChapterId =
+      gnid.type === 'local'
+        ? LOCAL_FULL_CHAPTER_ID
+        : decodeUrlPart(route.params.chapterId as string);
     if (urlChapterId === targetChapterId.value) {
       return;
     }
@@ -193,6 +238,7 @@ useScrollDetector((payload) => {
   ReadPositionRepo.addPosition(gnid, {
     chapterId: payload.chapterId,
     scrollY: payload.y,
+    paragraphIndex: payload.paragraphIndex,
   });
 
   if (readerSetting.value.pageTurnMode === 'scroll') {
@@ -374,7 +420,12 @@ onKeyDown(['Enter'], (e) => {
           :chapter="currentChapter"
         />
         <n-divider />
-        <n-flex align="center" justify="space-between" style="width: 100%">
+        <n-flex
+          v-if="gnid.type !== 'local'"
+          align="center"
+          justify="space-between"
+          style="width: 100%"
+        >
           <ReuseChapterLink :id="currentChapter.prevId" label="上一章" />
           <ReuseChapterLink :id="currentChapter.nextId" label="下一章" />
         </n-flex>
@@ -403,7 +454,7 @@ onKeyDown(['Enter'], (e) => {
             :chapter="item.chapter"
           />
 
-          <template v-if="!item.chapter.nextId">
+          <template v-if="!item.chapter.nextId && gnid.type !== 'local'">
             <div style="text-align: center; margin: 48px 0">暂无更多章节</div>
           </template>
         </template>
@@ -416,6 +467,7 @@ onKeyDown(['Enter'], (e) => {
       v-model:show="showCatalogModal"
       :gnid="gnid"
       :chapter-id="currentChapterId"
+      @jump="jumpToLocalChapter"
     />
   </div>
 </template>

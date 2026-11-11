@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Novelia 轻小说机翻机器人",
   "mainBinaryName": "Novelia",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "identifier": "cc.novelia.client",
   "build": {
     "frontendDist": "../dist",
@@ -25,18 +25,14 @@
     "licenseFile": "../../LICENSE",
     "shortDescription": "Novelia 轻小说机翻机器人",
     "longDescription": "Novelia 轻小说机翻机器人",
-    "externalBin": [
-      "binaries/ech-proxy"
-    ],
+    "externalBin": ["binaries/ech-proxy"],
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico",
         "installMode": "currentUser",
         "displayLanguageSelector": false,
         "template": "installer.nsi",
-        "languages": [
-          "SimpChinese"
-        ]
+        "languages": ["SimpChinese"]
       }
     },
     "resources": {

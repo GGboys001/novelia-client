@@ -120,8 +120,9 @@ const menuKey = computed(() => {
     :account-options="[]"
     :selected-navigation-key="menuKey"
   >
-    <template v-if="isMobile" #header-actions>
-      <RouterLink :to="favoriteTo" aria-label="我的收藏">
+    <template #header-actions>
+      <DownloadManagerButton />
+      <RouterLink v-if="isMobile" :to="favoriteTo" aria-label="我的收藏">
         <XButton
           size="icon"
           color="neutral"

@@ -2,6 +2,7 @@
 import { GenericNovelId } from '@/model/Common';
 import type { LocalVolumeMetadata } from '@/model/LocalVolume';
 import type { TranslatorId } from '@/model/Translator';
+import { LOCAL_FULL_CHAPTER_ID } from '@/pages/reader/ReaderStore';
 import { useSettingStore } from '@/stores';
 
 const props = defineProps<{
@@ -34,12 +35,10 @@ const startTranslateTask = (translatorId: 'youdao') =>
 <template>
   <n-flex :size="4" vertical>
     <c-a
-      v-if="!volume.id.endsWith('.epub')"
-      :to="`/workspace/reader/${encodeURIComponent(volume.id)}/0`"
+      :to="`/workspace/reader/${encodeURIComponent(volume.id)}/${LOCAL_FULL_CHAPTER_ID}`"
     >
       {{ volume.id }}
     </c-a>
-    <n-text v-else>{{ volume.id }}</n-text>
 
     <n-text depth="3">
       总计 {{ volume.toc.length }} / 有道 {{ youdao }} / GPT {{ gpt }} / Sakura

@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 
+import { LOCAL_TOC_VERSION } from '@/model/LocalVolume';
 import { parseFile, Srt } from '@/util/file';
 
 import { EpubParserV1 } from './EpubParser';
@@ -18,7 +19,11 @@ export const createVolume = async (
     throw Error('小说已经存在');
   }
 
-  const chapters: { chapterId: string; paragraphs: string[] }[] = [];
+  const chapters: {
+    chapterId: string;
+    title?: string;
+    paragraphs: string[];
+  }[] = [];
 
   onPhase?.('parsing');
   const myFile = await parseFile(file);
@@ -31,9 +36,16 @@ export const createVolume = async (
       chapters.push({ chapterId: i.toString(), paragraphs });
     }
   } else if (myFile.type === 'epub') {
-    for await (const item of myFile.iterDoc()) {
-      const paragraphs = EpubParserV1.extractText(item.doc);
-      chapters.push({ chapterId: item.href, paragraphs });
+    const chapterTitles = myFile.getChapterTitles();
+    // 按 spine（阅读顺序）导入，避免受 manifest 顺序影响。
+    for (const item of myFile.iterDocInSpine()) {
+      const paragraphs = await EpubParserV1.extractText(item.doc, (src) =>
+        myFile.resolveResourceDataUrl(item.href, src),
+      );
+      // 只保存目录项/正文章节标题，扉页、插图、出版信息等留空。
+      const title =
+        chapterTitles.get(item.href)?.replace(/\s+/g, ' ').trim() || undefined;
+      chapters.push({ chapterId: item.href, title, paragraphs });
     }
   } else if (myFile.type === 'srt') {
     const lines = myFile.subtitles
@@ -43,7 +55,13 @@ export const createVolume = async (
   }
 
   onPhase?.('saving');
-  for (const { chapterId, paragraphs } of chapters) {
+  // EPUB 的导航页/封面等没有正文，导入时跳过，避免打开后停在空白章节。
+  const readableChapters = chapters.filter((it) =>
+    it.paragraphs.some((p) => p.trim().length > 0),
+  );
+  const finalChapters =
+    readableChapters.length > 0 ? readableChapters : chapters;
+  for (const { chapterId, paragraphs } of finalChapters) {
     await dao.createChapter({
       id: `${id}/${chapterId}`,
       volumeId: id,
@@ -53,8 +71,11 @@ export const createVolume = async (
   await dao.createMetadata({
     id,
     createAt: Date.now(),
-    toc: chapters.map((it) => ({
+    tocVersion: LOCAL_TOC_VERSION,
+    toc: finalChapters.map((it) => ({
       chapterId: it.chapterId,
+      // 没有标题时写空字符串，表示已经解析过、无需再从 EPUB 补全。
+      title: it.title ?? '',
     })),
     glossaryId: uuidv4(),
     glossary: {},

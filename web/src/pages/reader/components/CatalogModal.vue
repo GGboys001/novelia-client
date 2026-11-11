@@ -12,6 +12,7 @@ import { useTocExpansion } from '@/pages/novel/components/UseTocExpansion';
 import { useIsWideScreen } from '@/pages/util';
 import { WebNovelRepo } from '@/repos';
 import { useLocalVolumeStore, useSettingStore } from '@/stores';
+import { loadLocalToc } from '@/stores/local/LocalToc';
 import type { Result } from '@/util/result';
 import { Err, Ok, runCatching } from '@/util/result';
 
@@ -23,10 +24,24 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:show': [boolean];
+  /** 本地小说整篇加载时，点击目录跳转到对应章节。 */
+  jump: [string];
 }>();
 
 type TocItem = ReadableTocItem & {
   key: number;
+};
+
+const chapterFallbackTitle = (chapterId: string) =>
+  chapterId
+    .split('/')
+    .pop()
+    ?.replace(/\.[^.]+$/, '') || chapterId;
+
+const onLocalTocClick = (item: TocItem) => {
+  if (!item.chapterId) return;
+  emit('update:show', false);
+  emit('jump', item.chapterId);
 };
 
 const tocResult = shallowRef<Result<TocItem[]>>();
@@ -43,6 +58,13 @@ const settingStore = useSettingStore();
 const { setting } = storeToRefs(settingStore);
 
 const sortReverse = computed(() => setting.value.tocSortReverse);
+
+/** 本地目录按设置里的正序/倒序展示。 */
+const localTocData = computed(() => {
+  const data = tocData.value;
+  if (!data) return undefined;
+  return sortReverse.value ? [...data].reverse() : data;
+});
 
 const isWideScreen = useIsWideScreen();
 
@@ -86,14 +108,34 @@ watch(
           const repo = await useLocalVolumeStore();
           const volume = await repo.getVolume(volumeId);
           if (volume === undefined) throw Error('小说不存在');
-          return volume.toc.map(
-            (it, index) =>
-              <TocItem>{
-                titleJp: it.chapterId,
-                chapterId: it.chapterId,
-                key: index,
-              },
-          );
+
+          const toc = await loadLocalToc(volume);
+          const items: TocItem[] = [];
+          toc.forEach((it, index) => {
+            const title = it.title?.trim();
+            // 没有标题的封面/插图页不放进目录，避免显示 p-001 之类的文件名。
+            if (!title) return;
+            items.push(<TocItem>{
+              titleJp: title,
+              chapterId: it.chapterId,
+              // 本地卷没有分卷分隔行，全部按章节渲染，否则会被当成目录分组。
+              order: items.length,
+              key: index,
+            });
+          });
+          // TXT/SRT 没有章节名，退回按章节序号展示。
+          if (items.length === 0) {
+            return toc.map(
+              (it, index) =>
+                <TocItem>{
+                  titleJp: chapterFallbackTitle(it.chapterId),
+                  chapterId: it.chapterId,
+                  order: index,
+                  key: index,
+                },
+            );
+          }
+          return items;
         };
 
         const gnid = props.gnid;
@@ -192,22 +234,39 @@ const onTocItemClick = (item: ReadableTocItem) => {
         }"
         @item-click="onTocItemClick"
       />
-      <ChapterTocList
-        v-else-if="gnid.type === 'local' && tocSections"
-        :toc-sections="tocSections"
-        v-model:expanded-names="expandedNames"
-        :last-read-chapter-id="chapterId"
-        :default-scroll-key="currentKey"
-        :provider-id="gnid.volumeId"
-        :novel-id="gnid.volumeId"
-        :sort-reverse="sortReverse"
-        :mode="{
-          narrow: !isWideScreen,
-          modal: true,
-          collapse: false,
-        }"
-        @item-click="onTocItemClick"
-      />
+      <n-scrollbar
+        v-else-if="gnid.type === 'local' && localTocData"
+        trigger="none"
+        style="max-height: 60vh"
+      >
+        <n-empty v-if="localTocData.length === 0" description="没有章节" />
+        <div v-else class="local-toc-list">
+          <div
+            v-for="item in localTocData"
+            :key="item.key"
+            class="local-toc-item"
+            @click="onLocalTocClick(item)"
+          >
+            {{ item.titleJp }}
+          </div>
+        </div>
+      </n-scrollbar>
     </template>
   </XDialog>
 </template>
+
+<style scoped>
+.local-toc-list {
+  display: flex;
+  flex-direction: column;
+}
+.local-toc-item {
+  padding: 10px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.local-toc-item:hover {
+  background: rgba(128, 128, 128, 0.12);
+}
+</style>

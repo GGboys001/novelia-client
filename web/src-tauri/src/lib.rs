@@ -16,7 +16,7 @@ use axum::{
     Router,
 };
 use reqwest::{Client, Url};
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 #[derive(Clone)]
 struct CookieJar {
@@ -189,6 +189,23 @@ impl Default for NetworkConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+struct DownloadConfig {
+    /// 自定义下载目录。空字符串表示使用默认目录。
+    dir: String,
+}
+
+#[derive(Clone, Serialize)]
+struct DownloadSettings {
+    /// 用户设置的目录，空表示使用默认目录。
+    dir: String,
+    /// 平台默认下载目录。
+    default_dir: String,
+    /// 实际生效的下载目录。
+    resolved_dir: String,
+}
+
 struct EchSidecar {
     #[allow(dead_code)]
     child: Child,
@@ -203,13 +220,23 @@ struct AppState {
     client: Arc<RwLock<Client>>,
     /// 访问本地侧车用，不走任何上游代理。
     local_client: Client,
+    /// 访问 ECH 侧车 `/fetch` 专用：禁止自动跟随跳转。
+    ///
+    /// 文件下载接口会 302 到 `/files-temp/...`，若在侧车这一层跟随，
+    /// 相对路径会解析成 `127.0.0.1:<sidecar>/files-temp/...`，命中侧车
+    /// 自己的 Go 路由而返回 404。跳转必须原样交给浏览器/本地代理处理。
+    ech_client: Client,
     jar: CookieJar,
     config: Arc<RwLock<NetworkConfig>>,
     config_path: PathBuf,
+    download_config: Arc<RwLock<DownloadConfig>>,
+    download_config_path: PathBuf,
     ech: Arc<Mutex<Option<EchSidecar>>>,
     api_base: String,
     auth_base: String,
     forum_base: String,
+    /// 本地代理端口，供原生下载与页面同源改写使用。
+    proxy_port: u16,
 }
 
 fn ech_binary_path() -> Option<PathBuf> {
@@ -405,7 +432,7 @@ async fn test_network(
         let (port, token) = ech_endpoint(&state)?;
         let started = Instant::now();
         let response = state
-            .local_client
+            .ech_client
             .get(format!("http://127.0.0.1:{port}/fetch"))
             .header("X-Novel-Ech-Token", token)
             .header(
@@ -514,7 +541,7 @@ async fn ech_forward(
 ) -> Result<reqwest::Response, String> {
     let url = Url::parse(upstream_url).map_err(|error| format!("上游地址无效: {error}"))?;
     let mut builder = state
-        .local_client
+        .ech_client
         .request(
             method.clone(),
             format!("http://127.0.0.1:{port}/fetch"),
@@ -548,6 +575,7 @@ async fn upstream_to_response(
 ) -> Response<Body> {
     let status = upstream.status();
     let headers = upstream.headers().clone();
+    let content_length = upstream.content_length();
 
     if let Some((jar, url)) = jar {
         let values: Vec<HeaderValue> = headers
@@ -558,19 +586,8 @@ async fn upstream_to_response(
         jar.store_response_cookies(&values, url);
     }
 
-    let bytes = match upstream.bytes().await {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            log::error!("读取上游响应失败: {error}");
-            return text_response(
-                StatusCode::BAD_GATEWAY,
-                &format!("读取上游响应失败: {error}"),
-                origin,
-            );
-        }
-    };
-
-    let mut response = Response::new(Body::from(bytes));
+    // 流式转发：下载大文件时前端能持续拿到进度，也避免整个文件驻留内存。
+    let mut response = Response::new(Body::from_stream(upstream.bytes_stream()));
     *response.status_mut() =
         StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     for (name, value) in headers.iter() {
@@ -578,6 +595,14 @@ async fn upstream_to_response(
             continue;
         }
         response.headers_mut().insert(name.clone(), value.clone());
+    }
+    if let Some(length) = content_length {
+        if let Ok(value) = HeaderValue::from_str(&length.to_string()) {
+            response.headers_mut().insert(
+                HeaderName::from_static("x-novelia-content-length"),
+                value,
+            );
+        }
     }
     apply_cors(response.headers_mut(), origin);
     response
@@ -632,6 +657,12 @@ async fn proxy(State(state): State<AppState>, request: Request<Body>) -> Respons
     } else if let Some(rest) = path.strip_prefix("/forum") {
         // 评论等论坛接口走本地代理，避免 WebView 页面来源（tauri.localhost）被 CORS 拦截。
         (&state.forum_base, rest.to_string())
+    } else if path.starts_with("/files-temp")
+        || path.starts_with("/files-wenku")
+        || path.starts_with("/files-extra")
+    {
+        // 站点静态文件（临时下载、文库原始文件、横幅图片），保持同源可直接访问。
+        (&state.api_base, path.to_string())
     } else {
         return text_response(StatusCode::NOT_FOUND, "未知的代理路径", origin);
     };
@@ -786,13 +817,369 @@ async fn proxy(State(state): State<AppState>, request: Request<Body>) -> Respons
     upstream_to_response(upstream, origin, None).await
 }
 
+/// 客户端内的文件下载：把前端拿到的字节写入本地。
+///
+/// Android WebView 没有下载管理器，`<a download>` 与 blob 链接都不会有任何
+/// 反应，因此统一由前端取到 Blob 后交给这里落盘。优先写系统下载目录，
+/// 在 Android 11+ 无法直写公共目录时退回应用私有目录。
+#[tauri::command]
+fn save_download(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+    filename: String,
+    data: Vec<u8>,
+) -> Result<String, String> {
+    write_download(&app, state.inner(), &filename, &data)
+}
+
+#[derive(Clone, Serialize)]
+struct DownloadProgress {
+    id: String,
+    received: u64,
+    total: u64,
+}
+
+/// 由原生侧通过本地代理拉取下载地址并落盘，返回最终文件路径。
+///
+/// 相比让前端把整个文件通过 IPC 传回来，原生下载不需要把几 MB 的数据
+/// 序列化成数字数组，Android 上更稳定；下载过程通过事件回报进度。
+#[tauri::command]
+async fn download_url(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+    url: String,
+    filename: String,
+    task_id: Option<String>,
+) -> Result<String, String> {
+    let mut parsed = Url::parse(&url).map_err(|error| format!("下载地址无效: {error}"))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        _ => return Err("不支持的下载地址".to_owned()),
+    }
+
+    let host = parsed.host_str().unwrap_or_default().to_owned();
+    if host == "tauri.localhost" {
+        // 页面 origin 形式的本站地址，改写到本地代理。
+        let path = parsed.path().to_owned();
+        let query = parsed
+            .query()
+            .map(|value| format!("?{value}"))
+            .unwrap_or_default();
+        parsed = Url::parse(&format!(
+            "http://127.0.0.1:{}{path}{query}",
+            state.proxy_port
+        ))
+        .map_err(|error| format!("下载地址无效: {error}"))?;
+    } else if !matches!(host.as_str(), "127.0.0.1" | "localhost") {
+        return Err(format!("不支持的下载域名: {host}"));
+    }
+
+    let response = state
+        .local_client
+        .get(parsed.clone())
+        .send()
+        .await
+        .map_err(|error| format!("下载失败: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("下载失败: HTTP {}", status.as_u16()));
+    }
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    let total = response
+        .headers()
+        .get("x-novelia-content-length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    let base = if filename.trim().is_empty() {
+        "novelia-download".to_owned()
+    } else {
+        filename.trim().to_owned()
+    };
+    let name = if has_known_extension(&base) {
+        base
+    } else {
+        format!("{base}{}", infer_extension(&content_type, &parsed))
+    };
+
+    let dir = resolve_download_dir(&app, state.inner())?;
+    let path = unique_download_path(&dir, &sanitize_filename(&name));
+    let mut file = tokio::fs::File::create(&path)
+        .await
+        .map_err(|error| format!("创建文件失败: {error}"))?;
+    let task_id = task_id.unwrap_or_default();
+    let mut response = response;
+    let mut received: u64 = 0;
+    let mut last_emit = Instant::now()
+        .checked_sub(Duration::from_secs(1))
+        .unwrap_or_else(Instant::now);
+    let mut write_error: Option<String> = None;
+    use tokio::io::AsyncWriteExt;
+
+    loop {
+        let chunk = match response.chunk().await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(error) => {
+                write_error = Some(format!("读取下载内容失败: {error}"));
+                break;
+            }
+        };
+        if let Err(error) = file.write_all(&chunk).await {
+            write_error = Some(format!("写入文件失败: {error}"));
+            break;
+        }
+        received += chunk.len() as u64;
+        if last_emit.elapsed() >= Duration::from_millis(120) {
+            let _ = app.emit(
+                "download://progress",
+                DownloadProgress {
+                    id: task_id.clone(),
+                    received,
+                    total,
+                },
+            );
+            last_emit = Instant::now();
+        }
+    }
+
+    let flush_error = file.flush().await.err();
+    drop(file);
+    if let Some(error) = write_error {
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(error);
+    }
+    if let Some(error) = flush_error {
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(format!("写入文件失败: {error}"));
+    }
+
+    let _ = app.emit(
+        "download://progress",
+        DownloadProgress {
+            id: task_id,
+            received,
+            total: if total == 0 { received } else { total },
+        },
+    );
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 读取已下载文件，供 EPUB 导入本地书架使用（原始字节，避免 JSON 序列化开销）。
+#[tauri::command]
+fn read_download(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    let dir = resolve_download_dir(&app, state.inner())?;
+    let target = std::path::PathBuf::from(&path);
+    if !target.starts_with(&dir) {
+        return Err("无效的下载路径".to_owned());
+    }
+    let bytes = std::fs::read(&target).map_err(|error| format!("读取文件失败: {error}"))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+fn has_known_extension(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".epub") || lower.ends_with(".txt") || lower.ends_with(".zip")
+}
+
+fn infer_extension(content_type: &str, url: &Url) -> &'static str {
+    let content_type = content_type.to_ascii_lowercase();
+    if content_type.contains("epub") {
+        return ".epub";
+    }
+    if content_type.starts_with("text/plain") {
+        return ".txt";
+    }
+    if content_type.contains("zip") {
+        return ".zip";
+    }
+    let path = url.path().to_ascii_lowercase();
+    if path.ends_with(".epub") {
+        ".epub"
+    } else if path.ends_with(".txt") {
+        ".txt"
+    } else if path.ends_with(".zip") {
+        ".zip"
+    } else {
+        ""
+    }
+}
+
+fn unique_download_path(dir: &std::path::Path, safe: &str) -> std::path::PathBuf {
+    let mut path = dir.join(safe);
+    if path.exists() {
+        let (stem, ext) = match safe.rsplit_once('.') {
+            Some((stem, ext)) if !stem.is_empty() => {
+                (stem.to_owned(), format!(".{ext}"))
+            }
+            _ => (safe.to_owned(), String::new()),
+        };
+        let mut index = 1;
+        while path.exists() {
+            path = dir.join(format!("{stem} ({index}){ext}"));
+            index += 1;
+        }
+    }
+    path
+}
+
+fn write_download(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    filename: &str,
+    data: &[u8],
+) -> Result<String, String> {
+    let safe = sanitize_filename(filename);
+    let dir = resolve_download_dir(app, state)?;
+    let path = unique_download_path(&dir, &safe);
+    std::fs::write(&path, data).map_err(|error| format!("写入失败: {error}"))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 平台默认下载目录：优先系统下载目录下的 Novelia，Android 无法直写时退回应用私有目录。
+fn pick_default_download_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let candidates = [
+        app.path().download_dir().ok().map(|it| it.join("Novelia")),
+        app.path().app_data_dir().ok().map(|it| it.join("downloads")),
+    ];
+    let mut last_error = String::from("无法确定下载目录");
+    for candidate in candidates.into_iter().flatten() {
+        match std::fs::create_dir_all(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(error) => last_error = format!("{:?}: {error}", candidate),
+        }
+    }
+    Err(last_error)
+}
+
+fn resolve_download_dir(
+    app: &tauri::AppHandle,
+    state: &AppState,
+) -> Result<PathBuf, String> {
+    let config = state
+        .download_config
+        .read()
+        .map(|it| it.clone())
+        .unwrap_or_default();
+    resolve_download_dir_for(app, &config)
+}
+
+fn resolve_download_dir_for(
+    app: &tauri::AppHandle,
+    config: &DownloadConfig,
+) -> Result<PathBuf, String> {
+    let custom = config.dir.trim();
+    let dir = if custom.is_empty() {
+        pick_default_download_dir(app)?
+    } else {
+        let path = PathBuf::from(custom);
+        if !path.is_absolute() {
+            return Err(format!("下载目录必须是绝对路径: {custom}"));
+        }
+        path
+    };
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| format!("无法创建下载目录 {}: {error}", dir.display()))?;
+    Ok(dir)
+}
+
+fn save_download_config(path: &PathBuf, config: &DownloadConfig) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| format!("创建配置目录失败: {error}"))?;
+    }
+    let text = serde_json::to_string_pretty(config).map_err(|error| error.to_string())?;
+    std::fs::write(path, text).map_err(|error| format!("保存下载设置失败: {error}"))
+}
+
+fn build_download_settings(app: &tauri::AppHandle, state: &AppState) -> DownloadSettings {
+    let dir = state
+        .download_config
+        .read()
+        .map(|it| it.dir.clone())
+        .unwrap_or_default();
+    let default_dir = pick_default_download_dir(app).unwrap_or_default();
+    let resolved = if dir.trim().is_empty() {
+        default_dir.clone()
+    } else {
+        PathBuf::from(dir.trim())
+    };
+    DownloadSettings {
+        dir,
+        default_dir: default_dir.to_string_lossy().to_string(),
+        resolved_dir: resolved.to_string_lossy().to_string(),
+    }
+}
+
+#[tauri::command]
+fn get_download_settings(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> DownloadSettings {
+    build_download_settings(&app, state.inner())
+}
+
+#[tauri::command]
+fn set_download_settings(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    config: DownloadConfig,
+) -> Result<DownloadSettings, String> {
+    let config = DownloadConfig {
+        dir: config.dir.trim().to_owned(),
+    };
+    // 立即创建并校验目录，避免用户保存一个不可写的路径。
+    resolve_download_dir_for(&app, &config)?;
+    save_download_config(&state.download_config_path, &config)?;
+    *state
+        .download_config
+        .write()
+        .map_err(|_| "下载设置不可用".to_owned())? = config;
+    Ok(build_download_settings(&app, state.inner()))
+}
+
+fn sanitize_filename(name: &str) -> String {
+    let mapped: String = name
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?')
+            {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let mapped = mapped.trim_matches(['.', ' ']).to_owned();
+    if mapped.is_empty() {
+        "novelia-download".to_owned()
+    } else {
+        mapped
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             get_network_config,
             set_network_config,
-            test_network
+            test_network,
+            get_download_settings,
+            set_download_settings,
+            save_download,
+            download_url,
+            read_download
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -820,15 +1207,27 @@ pub fn run() {
 
             let cookie_path = data_dir.join("cookies.json");
             let config_path = data_dir.join("network.json");
+            let download_config_path = data_dir.join("download.json");
             let jar = CookieJar::new(cookie_path);
 
             let config = std::fs::read_to_string(&config_path)
                 .ok()
                 .and_then(|text| serde_json::from_str::<NetworkConfig>(&text).ok())
                 .unwrap_or_default();
+            let download_config = std::fs::read_to_string(&download_config_path)
+                .ok()
+                .and_then(|text| serde_json::from_str::<DownloadConfig>(&text).ok())
+                .unwrap_or_default();
             let client = build_client(jar.clone(), &config)?;
             let local_client = Client::builder()
                 .no_proxy()
+                .connect_timeout(Duration::from_secs(5))
+                .timeout(Duration::from_secs(90))
+                .build()?;
+            // ECH 跳转必须由上层处理，否则相对 Location 会落到侧车自身的地址。
+            let ech_client = Client::builder()
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none())
                 .connect_timeout(Duration::from_secs(5))
                 .timeout(Duration::from_secs(90))
                 .build()?;
@@ -850,13 +1249,17 @@ pub fn run() {
             let state = AppState {
                 client: Arc::new(RwLock::new(client)),
                 local_client,
+                ech_client,
                 jar,
                 config: Arc::new(RwLock::new(config)),
                 config_path,
+                download_config: Arc::new(RwLock::new(download_config)),
+                download_config_path,
                 ech: Arc::new(Mutex::new(ech_state)),
                 api_base: "https://n.novelia.cc".to_owned(),
                 auth_base: "https://auth.novelia.cc".to_owned(),
                 forum_base: "https://forum.novelia.cc".to_owned(),
+                proxy_port: port,
             };
 
             app.manage(state.clone());

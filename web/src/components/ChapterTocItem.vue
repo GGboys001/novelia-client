@@ -42,16 +42,17 @@ const mixColor = () => {
   return `rgb(${mr}, ${mg}, ${mb})`;
 };
 const visitedColor = mixColor();
+
+const to = computed(() => {
+  if (props.isSeparator) return undefined;
+  return `/novel/${props.providerId}/${props.novelId}/${props.tocItem.chapterId ?? ''}`;
+});
 </script>
 
 <template>
   <component
     :is="!isSeparator ? CA : 'div'"
-    :to="
-      !isSeparator
-        ? `/novel/${providerId}/${novelId}/${tocItem.chapterId}`
-        : undefined
-    "
+    :to="to"
     class="toc"
     :class="{ 'toc-separator': isSeparator }"
     style="width: calc(100% - 24px); display: block"

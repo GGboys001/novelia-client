@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 
 import type { Glossary } from '@/model/Glossary';
+import { LOCAL_TOC_VERSION } from '@/model/LocalVolume';
 import type {
   ChapterTranslation,
   LocalVolumeChapter,
@@ -39,6 +40,13 @@ export const createLocalVolumeStore = async () => {
   const updateFavoredId = (id: string, favoredId: string) =>
     dao.updateMetadata(id, (value) => {
       value.favoredId = favoredId;
+      return value;
+    });
+
+  const updateToc = (id: string, toc: LocalVolumeMetadata['toc']) =>
+    dao.updateMetadata(id, (value) => {
+      value.toc = toc;
+      value.tocVersion = LOCAL_TOC_VERSION;
       return value;
     });
 
@@ -95,6 +103,7 @@ export const createLocalVolumeStore = async () => {
     updateGlossary,
     updateReadAt,
     updateFavoredId,
+    updateToc,
     //
     getChapter: dao.getChapter,
     updateTranslation,

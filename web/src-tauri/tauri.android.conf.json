@@ -9,5 +9,8 @@
         "resizable": true
       }
     ]
+  },
+  "bundle": {
+    "externalBin": []
   }
 }

@@ -6,10 +6,10 @@
 
 前往 [Releases](https://github.com/GGboys001/novelia-client/releases) 下载安装包：
 
-| 平台 | 文件 | 说明 |
-| --- | --- | --- |
-| Windows x64 | `Novelia-Setup-0.1.5-x64.exe` | 安装到 `%LOCALAPPDATA%\Novelia`，自动创建桌面与开始菜单快捷方式，可在「应用和功能」中卸载 |
-| Android arm64 | `Novelia-0.1.5-arm64.apk` | 直接覆盖安装，应用包名为 `cc.novelia.client.debug` |
+| 平台          | 文件                          | 说明                                                                                      |
+| ------------- | ----------------------------- | ----------------------------------------------------------------------------------------- |
+| Windows x64   | `Novelia-Setup-0.2.0-x64.exe` | 安装到 `%LOCALAPPDATA%\Novelia`，自动创建桌面与开始菜单快捷方式，可在「应用和功能」中卸载 |
+| Android arm64 | `Novelia-0.2.0-arm64.apk`     | 直接覆盖安装，应用包名为 `cc.novelia.client.debug`                                        |
 
 Windows 端依赖系统自带的 WebView2 运行时（Windows 11 与较新的 Windows 10 默认已安装）。Android 端当前为 arm64 调试签名包，未适配 armeabi-v7a 与 x86。
 
@@ -23,6 +23,12 @@ Windows 端依赖系统自带的 WebView2 运行时（Windows 11 与较新的 Wi
 - 支持 Windows 安装包与 Android arm64 APK
 - Android 端适配 edge-to-edge：由原生层把状态栏与手势条高度写入 CSS 变量，顶部导航不会被系统栏遮挡
 - 论坛在应用内打开：跳转时带上登录态，并按同一套安全区规则避让状态栏（其它外站仍走系统浏览器）
+- 支持在应用内下载网络小说/文库小说的 EPUB 和 TXT：由原生侧经本地代理下载并落盘，不再依赖 WebView 的下载管理器
+- 内置下载管理面板：任务卡片、实时进度、状态与错误提示、保存路径展示，并可一键跳转下载目录设置
+- 下载目录支持自定义，Windows 与 Android 双端生效；留空时使用平台默认目录
+- 下载的 EPUB 会自动导入「我的收藏 → 本地小说」，可直接按应用内字号、行距、页宽与主题阅读；也可手动导入 EPUB/TXT/SRT
+- 本地小说整篇连续加载，同时保留 EPUB 目录：按「表紙 / 目次 / 正文章节名 / 奥付」展示，点击可跳转到对应章节
+- 支持本地 EPUB 插图显示、中日/日中双语主辅文字透明度识别，以及跨会话恢复阅读位置
 
 ## 源码结构
 

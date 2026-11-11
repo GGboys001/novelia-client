@@ -4,6 +4,8 @@ import { safeJson } from '@/util';
 interface ReadPosition {
   chapterId: string;
   scrollY: number;
+  /** 当前阅读到的段落序号，用于更精确地恢复位置。 */
+  paragraphIndex?: number;
 }
 
 type ReaderPositions = Record<string, ReadPosition | undefined>;

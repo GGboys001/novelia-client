@@ -5,6 +5,11 @@ import { PiniaColada } from '@pinia/colada';
 import App from './App.vue';
 import router from './router';
 import './style.css';
+import { installDownloadProgressListener } from './stores/useDownloadStore';
+import { installDownloadInterceptor } from './util/download';
+
+installDownloadInterceptor();
+installDownloadProgressListener();
 
 const app = createApp(App);
 

@@ -1,5 +1,8 @@
 interface EpubParser {
-  extractText: (doc: Document) => string[];
+  extractText: (
+    doc: Document,
+    resolveImage?: (src: string) => Promise<string | undefined>,
+  ) => Promise<string[]>;
   injectTranslation: (
     doc: Document,
     mode: 'zh' | 'jp-zh' | 'zh-jp',
@@ -8,16 +11,34 @@ interface EpubParser {
 }
 
 export const EpubParserV1: EpubParser = {
-  extractText: (doc: Document) => {
+  extractText: async (doc, resolveImage) => {
     Array.from(doc.getElementsByTagName('rt')).forEach((node) =>
       node.parentNode!.removeChild(node),
     );
     Array.from(doc.getElementsByTagName('rp')).forEach((node) =>
       node.parentNode!.removeChild(node),
     );
-    return Array.from(doc.body.getElementsByTagName('p'))
-      .map((el) => el.innerText)
-      .filter((it) => it.trim().length !== 0);
+
+    // 按文档顺序遍历段落与插图，插图以内嵌数据的形式与正文一起保存。
+    const paragraphs: string[] = [];
+    const nodes = Array.from(doc.body.querySelectorAll('p, img, image'));
+    for (const node of nodes) {
+      const tag = node.tagName.toLowerCase();
+      if (tag === 'p') {
+        const text = (node as HTMLElement).innerText.trim();
+        if (text) paragraphs.push(text);
+        continue;
+      }
+      if (!resolveImage) continue;
+      const src =
+        node.getAttribute('src') ??
+        node.getAttribute('xlink:href') ??
+        node.getAttribute('href');
+      if (!src) continue;
+      const dataUrl = await resolveImage(src);
+      if (dataUrl) paragraphs.push(`<图片>${dataUrl}`);
+    }
+    return paragraphs;
   },
   injectTranslation: (
     doc: Document,

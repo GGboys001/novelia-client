@@ -1,11 +1,13 @@
 import { get } from 'lodash-es';
 
+import { downloadBlob } from './download';
+
+/**
+ * 触发下载。客户端内交给原生落盘（WebView 没有下载管理器），
+ * 浏览器环境仍走 `<a download>`。
+ */
 export const downloadFile = (filename: string, blob: Blob) => {
-  const el = document.createElement('a');
-  el.href = URL.createObjectURL(blob);
-  el.target = '_blank';
-  el.download = filename;
-  el.click();
+  void downloadBlob(filename, blob);
 };
 
 export const querySearch = <T>(

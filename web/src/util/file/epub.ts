@@ -15,6 +15,63 @@ const CONTAINER_TEMPLATE = `<?xml version="1.0" encoding="utf-8"?>
 const getEl = (doc: Document, tagName: string) =>
   doc.getElementsByTagName(tagName).item(0);
 
+const normalizeTitle = (value: string | null | undefined) =>
+  (value ?? '').replace(/\s+/g, ' ').trim();
+
+const compactTitle = (value: string) => value.replace(/\s+/g, '');
+
+/** 出版/版权信息等页面不应当作章节标题。 */
+const PUBLICATION_TITLE =
+  /装订|装丁|発行|发行|印刷|出版|ISBN|定価|定价|Copyright|©/i;
+
+/** 判断正文首段是否像章节标题（编号、第X章或常见章节名）。 */
+const isChapterTitle = (title: string) => {
+  const compact = compactTitle(title);
+  return (
+    /^第[0-9０-９一二三四五六七八九十百千零〇两]+[章回节節话話卷部篇]/.test(
+      compact,
+    ) ||
+    /^[0-9０-９]+/.test(compact) ||
+    /^(序章|序說|序说|序|プロローグ|エピローグ|终章|終章|尾声|尾聲|后记|後記|あとがき|目次|目錄|目录|幕间|幕間|闲话|閑話|番外)/.test(
+      compact,
+    )
+  );
+};
+
+/** 奥付及其之后的内容是版权/出版信息，不再生成章节标题。 */
+const isColophonTitle = (title: string) =>
+  /^(奥付|版权页|版權頁|colophon)$/i.test(compactTitle(title));
+
+/**
+ * 从正文文档中提取章节标题：优先 h1～h3，其次首个短段落。
+ *
+ * 部分 EPUB 的 nav 只包含封面/奥付，章节标题写在正文第一段
+ * （如「1　序章」），此时需要从正文补全。
+ */
+export const extractDocumentTitle = (doc: Document) => {
+  const looksLikeTitle = (text: string) =>
+    text.length > 0 && text.length <= 40 && !text.includes('。');
+
+  for (const el of Array.from(doc.querySelectorAll('h1, h2, h3'))) {
+    const text = normalizeTitle(el.textContent);
+    if (looksLikeTitle(text)) return text;
+  }
+  for (const el of Array.from(doc.body?.querySelectorAll('p') ?? [])) {
+    const text = normalizeTitle(el.textContent);
+    if (!text) continue;
+    return looksLikeTitle(text) ? text : undefined;
+  }
+  return undefined;
+};
+
+const blobToDataUrl = (blob: Blob) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+
 const MIME = {
   IMAGE: [
     'image/gif',
@@ -64,6 +121,27 @@ export class Epub extends BaseFile {
     const rootUrl = new URL(root, 'file://book');
     const newURL = new URL(rpath, rootUrl);
     return decodeURIComponent(newURL.pathname.substring(1));
+  }
+
+  /** 把文档内的相对资源（如插图）解析为内嵌 data URL，便于本地持久化。 */
+  async resolveResourceDataUrl(
+    fromHref: string,
+    src: string,
+  ): Promise<string | undefined> {
+    const value = src.trim();
+    if (!value) return undefined;
+    if (value.startsWith('data:')) return value;
+    // http(s) 等外链图片不内嵌，避免离线阅读时依赖网络。
+    if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return undefined;
+
+    const docPath = this.resolve(this.packagePath, fromHref);
+    const targetPath = this.resolve(docPath, value.split('#')[0]);
+    for (const item of this.items.values()) {
+      if (!('blob' in item)) continue;
+      if (this.resolve(this.packagePath, item.href) !== targetPath) continue;
+      return await blobToDataUrl(item.blob);
+    }
+    return undefined;
   }
 
   // 目录中的链接相对于目录文件，转换为与 manifest href 一致的相对于 package 的路径
@@ -387,6 +465,74 @@ export class Epub extends BaseFile {
   }
   iterDoc() {
     return [...this.items.values()].filter((item) => 'doc' in item);
+  }
+  /**
+   * 提取章节标题：nav/ncx 优先，其余章节从正文补全。
+   *
+   * 只保留「表紙 / 目次 / 正文章节名 / 奥付」这类目录项：
+   * 扉页、插图、注意事项、装订信息等不生成标题。
+   */
+  getChapterTitles() {
+    const titles = new Map<string, string>();
+    const walk = (items: EpubNavItem[]) => {
+      for (const item of items) {
+        if (item.href && item.text) titles.set(item.href, item.text);
+        walk(item.children);
+      }
+    };
+    walk(this.navItems);
+    const navHrefs = new Set(titles.keys());
+
+    const spine = this.iterDocInSpine();
+    const spineIndex = new Map(
+      spine.map((item, index) => [item.href, index] as const),
+    );
+
+    // 奥付之后是出版/版权信息，不再作为章节。
+    let endIndex = spine.length;
+    for (const [href, title] of titles) {
+      if (!isColophonTitle(title)) continue;
+      const index = spineIndex.get(href);
+      if (index !== undefined) endIndex = Math.min(endIndex, index);
+    }
+
+    // 从第一个像章节的正文标题开始，之前的封面/扉页等不生成标题。
+    let startIndex = 0;
+    let foundChapter = false;
+    for (let i = 0; i < spine.length; i++) {
+      const item = spine[i];
+      if (navHrefs.has(item.href)) continue;
+      const candidate = extractDocumentTitle(item.doc);
+      if (candidate && isChapterTitle(candidate)) {
+        startIndex = i;
+        foundChapter = true;
+        break;
+      }
+    }
+    if (!foundChapter) startIndex = 0;
+
+    const bookTitle = this.getBookTitle();
+    for (let i = startIndex; i < endIndex; i++) {
+      const item = spine[i];
+      if (titles.has(item.href)) continue;
+      const title = extractDocumentTitle(item.doc);
+      if (!title || title === bookTitle) continue;
+      if (PUBLICATION_TITLE.test(title)) continue;
+      titles.set(item.href, title);
+    }
+    return titles;
+  }
+
+  /** EPUB 书名（dc:title），用于过滤正文里重复的书名标题。 */
+  getBookTitle() {
+    const metadata = getEl(this.packageDoc, 'metadata');
+    if (!metadata) return undefined;
+    const title =
+      metadata.getElementsByTagNameNS(
+        'http://purl.org/dc/elements/1.1/',
+        'title',
+      )[0] ?? metadata.getElementsByTagName('dc:title')[0];
+    return normalizeTitle(title?.textContent) || undefined;
   }
   iterBlob(mediaTypes: string[]) {
     return [...this.items.values()]

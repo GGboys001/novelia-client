@@ -18,6 +18,47 @@ const osThemeRef = useOsTheme();
 
 const paragraphs = computed(() => buildParagraphs(props.gnid, props.chapter));
 
+/**
+ * 章节标题按原文段落下标定位。单语模式会跳过另一种语言的段落，
+ * 因此把标题挂到该章节第一条实际渲染的段落上，保证标题不会丢失。
+ */
+const titleAt = computed(() => {
+  const map = new Map<number, { title: string; paragraphIndex: number }>();
+  const ranges = props.chapter.chapterRanges;
+  if (!ranges?.length) return map;
+  let rangeIndex = 0;
+  const list = paragraphs.value;
+  for (let i = 0; i < list.length; i++) {
+    const currentIndex = list[i]?.paragraphIndex ?? i;
+    while (
+      rangeIndex < ranges.length &&
+      ranges[rangeIndex].paragraphIndex <= currentIndex
+    ) {
+      map.set(i, ranges[rangeIndex]);
+      rangeIndex++;
+    }
+  }
+  return map;
+});
+
+/** 段落实际对应的原文下标，用于目录跳转和阅读进度。 */
+const rawIndex = (index: number) =>
+  paragraphs.value[index]?.paragraphIndex ?? index;
+
+const normalizeText = (value: string) => value.replace(/\s+/g, ' ').trim();
+
+/** 章节正文首段本身就是标题时，不再重复渲染分节标题。 */
+const showSectionTitle = (index: number) => {
+  const range = titleAt.value.get(index);
+  if (!range?.title) return false;
+  const paragraph = paragraphs.value[index];
+  return !(
+    paragraph &&
+    'text' in paragraph &&
+    normalizeText(paragraph.text) === normalizeText(range.title)
+  );
+};
+
 const readerSettingStore = useReaderSettingStore();
 const { readerSetting } = storeToRefs(readerSettingStore);
 
@@ -96,7 +137,18 @@ const chapterHref = computed(() => {
         v-for="(p, index) of paragraphs"
         :key="`${chapter.prevId}/${index}`"
       >
-        <n-p v-if="p && 'text' in p" :aria-hidden="!p.needSpeak">
+        <h3
+          v-if="showSectionTitle(index)"
+          class="chapter-section-title"
+          :data-paragraph-index="titleAt.get(index)!.paragraphIndex"
+        >
+          {{ titleAt.get(index)!.title }}
+        </h3>
+        <n-p
+          v-if="p && 'text' in p"
+          :aria-hidden="!p.needSpeak"
+          :data-paragraph-index="rawIndex(index)"
+        >
           <span
             v-if="readerSetting.enableSourceLabel && p.source"
             class="source"
@@ -111,7 +163,10 @@ const chapterHref = computed(() => {
           </span>
         </n-p>
         <br v-else-if="!p" />
-        <details v-else-if="readerSetting.foldImages">
+        <details
+          v-else-if="readerSetting.foldImages"
+          :data-paragraph-index="rawIndex(index)"
+        >
           <summary class="fold-image">插图（点击展开）</summary>
           <img
             :src="p.imageUrl"
@@ -126,6 +181,7 @@ const chapterHref = computed(() => {
           :alt="p.imageUrl"
           style="max-width: 100%; object-fit: scale-down"
           loading="lazy"
+          :data-paragraph-index="rawIndex(index)"
         />
       </template>
     </div>
@@ -146,6 +202,14 @@ const chapterHref = computed(() => {
 }
 .chapter-content {
   min-height: 65vh;
+}
+.chapter-section-title {
+  margin: 2.4em 0 1.2em;
+  font-size: 1.15em;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+  color: v-bind('fontColor');
 }
 .chapter-content .fold-image {
   cursor: pointer;
